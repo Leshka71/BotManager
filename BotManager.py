@@ -114,7 +114,7 @@ LOG    = "#111111"
 HOVER  = "rgba(255,255,255,0.08)"
 SEL    = "rgba(255,255,255,0.12)"
 
-APP_VERSION = "1.0.8"
+APP_VERSION = "1.0.7"
 GITHUB_REPO = "Leshka71/BotManager"
 
 QSS = f"""
