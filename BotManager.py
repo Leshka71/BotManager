@@ -531,8 +531,9 @@ class SetPage(QWidget):
 
         sc = QScrollArea(); sc.setWidgetResizable(True)
         sc.setStyleSheet("border:none;background:transparent;")
+        sc.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         w = QWidget(); w.setStyleSheet(f"background:{BG};")
-        cl = QVBoxLayout(w); cl.setContentsMargins(16,16,16,16); cl.setSpacing(16)
+        cl = QVBoxLayout(w); cl.setContentsMargins(16,12,16,12); cl.setSpacing(10)
         cl.setAlignment(Qt.AlignmentFlag.AlignTop)
 
         # ── ЗАПУСК — с динамическим списком ботов ──
@@ -554,27 +555,31 @@ class SetPage(QWidget):
         cl.addWidget(upd_lbl)
 
         upd_card = QWidget(); upd_card.setStyleSheet(self._CARD)
-        upd_vl = QVBoxLayout(upd_card); upd_vl.setContentsMargins(16,12,16,12); upd_vl.setSpacing(8)
+        upd_row = QWidget(); upd_row.setFixedHeight(48)
+        upd_row.setStyleSheet(self._TR)
+        upd_rl = QHBoxLayout(upd_row); upd_rl.setContentsMargins(16,0,12,0); upd_rl.setSpacing(8)
 
-        upd_row = QWidget(); upd_row.setStyleSheet(self._TR)
-        upd_rl = QHBoxLayout(upd_row); upd_rl.setContentsMargins(0,0,0,0); upd_rl.setSpacing(12)
-        ver_lbl = QLabel(f"Текущая версия: v{APP_VERSION}")
+        ver_lbl = QLabel(f"v{APP_VERSION}")
         ver_lbl.setStyleSheet(f"color:{GRAY};font-size:13px;background:transparent;border:none;")
         self._upd_status = QLabel("")
         self._upd_status.setStyleSheet(f"color:{GRAY};font-size:12px;background:transparent;border:none;")
-        upd_rl.addWidget(ver_lbl); upd_rl.addStretch(); upd_rl.addWidget(self._upd_status)
-        upd_vl.addWidget(upd_row)
 
         self._upd_check_btn = QPushButton("Проверить обновления")
-        self._upd_check_btn.setFixedHeight(36)
+        self._upd_check_btn.setFixedHeight(32)
         self._upd_check_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._upd_check_btn.setStyleSheet(
-            f"QPushButton{{background:#3a3a3c;border:none;color:{WHITE};border-radius:10px;"
-            f"font-size:13px;font-weight:600;}}"
+            f"QPushButton{{background:#3a3a3c;border:none;color:{WHITE};border-radius:8px;"
+            f"font-size:12px;font-weight:600;padding:0 12px;}}"
             f"QPushButton:hover{{background:#48484a;}}")
         self._upd_check_btn.clicked.connect(self._on_check_update_clicked)
-        upd_vl.addWidget(self._upd_check_btn)
 
+        upd_rl.addWidget(ver_lbl)
+        upd_rl.addWidget(self._upd_status)
+        upd_rl.addStretch()
+        upd_rl.addWidget(self._upd_check_btn)
+
+        upd_vl = QVBoxLayout(upd_card); upd_vl.setContentsMargins(0,0,0,0); upd_vl.setSpacing(0)
+        upd_vl.addWidget(upd_row)
         cl.addWidget(upd_card)
         sc.setWidget(w); root.addWidget(sc)
 
@@ -615,7 +620,7 @@ class SetPage(QWidget):
 
         # Разделитель + шапка с кнопками
         self._bot_cl.addWidget(self._div())
-        btn_row = QWidget(); btn_row.setFixedHeight(44)
+        btn_row = QWidget(); btn_row.setFixedHeight(38)
         btn_row.setStyleSheet(self._TR)
         brl = QHBoxLayout(btn_row); brl.setContentsMargins(16,0,16,0); brl.setSpacing(8)
         brl.addWidget(label("Выбрать:", 12, GRAY)); brl.addStretch()
@@ -635,7 +640,7 @@ class SetPage(QWidget):
         # Строки ботов
         for bot in self._bots:
             self._bot_cl.addWidget(self._div_indent())
-            row = QWidget(); row.setFixedHeight(46); row.setStyleSheet(self._TR)
+            row = QWidget(); row.setFixedHeight(40); row.setStyleSheet(self._TR)
             rl = QHBoxLayout(row); rl.setContentsMargins(28,0,16,0); rl.setSpacing(10)
             dot = Dot(GREEN if bot.autostart else DARK, 7)
             lb = QLabel(bot.name)
@@ -708,10 +713,10 @@ class SetPage(QWidget):
         f.setStyleSheet("background:#3a3a3c;max-height:1px;border:none;margin-left:28px;"); return f
 
     def _row(self, t, key):
-        row = QWidget(); row.setFixedHeight(52)
+        row = QWidget(); row.setFixedHeight(44)
         row.setStyleSheet(self._TR)
         rl = QHBoxLayout(row); rl.setContentsMargins(16,0,16,0)
-        rl.addWidget(label(t, 14, WHITE)); rl.addStretch()
+        rl.addWidget(label(t, 13, WHITE)); rl.addStretch()
         tg = Toggle(self.s.get(key, False))
         tg.toggled.connect(lambda v, k=key: self._tog(k, v))
         rl.addWidget(tg); return row
