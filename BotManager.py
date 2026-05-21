@@ -114,7 +114,7 @@ LOG    = "#111111"
 HOVER  = "rgba(255,255,255,0.08)"
 SEL    = "rgba(255,255,255,0.12)"
 
-APP_VERSION = "1.0.7"
+APP_VERSION = "1.0.8"
 GITHUB_REPO = "Leshka71/BotManager"
 
 QSS = f"""
@@ -1522,14 +1522,12 @@ class App(QMainWindow):
 
     def _stop(self, bot):
         bot._alive = False; bot.status = "stopped"
+        exe_name = Path(bot.path).name if bot.path and bot.path.lower().endswith(".exe") else None
         if bot.process:
             pid = bot.process.pid
             try:
-                # Убиваем весь дерево процессов принудительно (/f = force, /t = tree)
-                subprocess.run(
-                    ['taskkill', '/f', '/t', '/pid', str(pid)],
-                    capture_output=True, timeout=5
-                )
+                subprocess.run(['taskkill', '/f', '/t', '/pid', str(pid)],
+                               capture_output=True, timeout=5)
             except Exception:
                 try: bot.process.kill()
                 except: pass
@@ -1537,6 +1535,13 @@ class App(QMainWindow):
                 try: bot.process.wait(timeout=2)
                 except: pass
             bot.process = None
+        # Убиваем все оставшиеся процессы с таким именем (например старый TorrServer)
+        if exe_name:
+            try:
+                subprocess.run(['taskkill', '/f', '/im', exe_name],
+                               capture_output=True, timeout=5)
+            except Exception:
+                pass
         bot.start_t = None
         page = self.pages.get(bot.id)
         if page: page.set_status("stopped"); page.add_log("⏹ Остановлен")
