@@ -516,6 +516,7 @@ class AddPage(QWidget):
 class SetPage(QWidget):
     changed              = pyqtSignal(dict)
     bot_autostart_changed = pyqtSignal(str, bool)   # bot_id, value
+    check_update_requested = pyqtSignal()
     _CARD = "QWidget{background:#2c2c2e;border-radius:12px;border:none;}"
     _TR   = "QWidget{background:transparent;border:none;border-radius:0;}"
 
@@ -545,6 +546,36 @@ class SetPage(QWidget):
             ("Сворачивать в трей",    "minimize_to_tray"),
             ("Автоперезапуск ботов",  "auto_restart"),
         ])
+
+        # ── ОБНОВЛЕНИЯ ──
+        upd_lbl = QLabel("ОБНОВЛЕНИЯ")
+        upd_lbl.setStyleSheet(f"color:{GRAY};font-size:11px;letter-spacing:1px;font-weight:600;"
+                              f"background:transparent;border:none;margin-bottom:2px;")
+        cl.addWidget(upd_lbl)
+
+        upd_card = QWidget(); upd_card.setStyleSheet(self._CARD)
+        upd_vl = QVBoxLayout(upd_card); upd_vl.setContentsMargins(16,12,16,12); upd_vl.setSpacing(8)
+
+        upd_row = QWidget(); upd_row.setStyleSheet(self._TR)
+        upd_rl = QHBoxLayout(upd_row); upd_rl.setContentsMargins(0,0,0,0); upd_rl.setSpacing(12)
+        ver_lbl = QLabel(f"Текущая версия: v{APP_VERSION}")
+        ver_lbl.setStyleSheet(f"color:{GRAY};font-size:13px;background:transparent;border:none;")
+        self._upd_status = QLabel("")
+        self._upd_status.setStyleSheet(f"color:{GRAY};font-size:12px;background:transparent;border:none;")
+        upd_rl.addWidget(ver_lbl); upd_rl.addStretch(); upd_rl.addWidget(self._upd_status)
+        upd_vl.addWidget(upd_row)
+
+        self._upd_check_btn = QPushButton("Проверить обновления")
+        self._upd_check_btn.setFixedHeight(36)
+        self._upd_check_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._upd_check_btn.setStyleSheet(
+            f"QPushButton{{background:#3a3a3c;border:none;color:{WHITE};border-radius:10px;"
+            f"font-size:13px;font-weight:600;}}"
+            f"QPushButton:hover{{background:#48484a;}}")
+        self._upd_check_btn.clicked.connect(self._on_check_update_clicked)
+        upd_vl.addWidget(self._upd_check_btn)
+
+        cl.addWidget(upd_card)
         sc.setWidget(w); root.addWidget(sc)
 
     # ── Строим секцию ЗАПУСК ──────────────────────────────────────────────────
@@ -637,6 +668,17 @@ class SetPage(QWidget):
                 t.setChecked(False)
                 if d: d.set(DARK)
                 self.bot_autostart_changed.emit(bot.id, False)
+
+    def _on_check_update_clicked(self):
+        self._upd_check_btn.setEnabled(False)
+        self._upd_status.setText("Проверяю...")
+        self._upd_status.setStyleSheet(f"color:{GRAY};font-size:12px;background:transparent;border:none;")
+        self.check_update_requested.emit()
+
+    def set_update_status(self, text, color):
+        self._upd_status.setText(text)
+        self._upd_status.setStyleSheet(f"color:{color};font-size:12px;background:transparent;border:none;")
+        self._upd_check_btn.setEnabled(True)
 
     # ── Хелперы ───────────────────────────────────────────────────────────────
     def _section(self, cl, title, rows):
@@ -1144,6 +1186,7 @@ class App(QMainWindow):
         self._setp = SetPage(self.cfg["settings"], self.bots)
         self._setp.changed.connect(self._on_set)
         self._setp.bot_autostart_changed.connect(self._on_bot_autostart)
+        self._setp.check_update_requested.connect(lambda: self._check_update(manual=True))
         self.stack.addWidget(self._setp)
         self._homep = HomePage(); self.stack.addWidget(self._homep)
         self._snakep = SnakePage(); self.stack.addWidget(self._snakep)
@@ -1207,7 +1250,7 @@ class App(QMainWindow):
             self._show_win()
 
     # ── Автообновление ────────────────────────────────────────────────────────
-    def _check_update(self):
+    def _check_update(self, manual=False):
         def _run():
             try:
                 url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
@@ -1216,18 +1259,37 @@ class App(QMainWindow):
                     data = json.loads(r.read())
                 latest = data.get("tag_name", "").lstrip("v")
                 if latest and latest != APP_VERSION:
-                    # Найдём ссылку на установщик
                     for asset in data.get("assets", []):
                         if asset["name"].endswith(".exe"):
                             self._upd_url = asset["browser_download_url"]
                             self._upd_ver = latest
-                            # Обновляем UI в главном потоке
                             QMetaObject.invokeMethod(self, "_show_update_btn",
                                                      Qt.ConnectionType.QueuedConnection)
+                            if manual:
+                                QMetaObject.invokeMethod(self, "_set_upd_status_new",
+                                                         Qt.ConnectionType.QueuedConnection)
                             break
+                else:
+                    if manual:
+                        QMetaObject.invokeMethod(self, "_set_upd_status_ok",
+                                                 Qt.ConnectionType.QueuedConnection)
             except Exception:
-                pass
+                if manual:
+                    QMetaObject.invokeMethod(self, "_set_upd_status_err",
+                                             Qt.ConnectionType.QueuedConnection)
         threading.Thread(target=_run, daemon=True).start()
+
+    @pyqtSlot()
+    def _set_upd_status_new(self):
+        self._setp.set_update_status(f"Доступно v{self._upd_ver}", GREEN)
+
+    @pyqtSlot()
+    def _set_upd_status_ok(self):
+        self._setp.set_update_status("Последняя версия", GRAY)
+
+    @pyqtSlot()
+    def _set_upd_status_err(self):
+        self._setp.set_update_status("Ошибка проверки", RED)
 
     @pyqtSlot()
     def _show_update_btn(self):
