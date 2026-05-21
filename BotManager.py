@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import sys, os, json, subprocess, time, winreg, random, ctypes
+import urllib.request, tempfile, threading
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtCore import QUrl
 from datetime import datetime
@@ -45,6 +46,9 @@ DARK   = "#48484a"
 LOG    = "#111111"
 HOVER  = "rgba(255,255,255,0.08)"
 SEL    = "rgba(255,255,255,0.12)"
+
+APP_VERSION = "1.0.0"
+GITHUB_REPO = "Leshka71/BotManager"
 
 QSS = f"""
 QWidget {{ background: {BG}; color: {WHITE}; font-family: 'Segoe UI'; font-size: 13px; margin: 0; padding: 0; }}
@@ -1021,6 +1025,7 @@ class App(QMainWindow):
         self.cfg = load_config(); self.bots = []; self.pages = {}; self.navs = {}
         self.cur = None; self._compact = False
         self._build(); self._tray(); self._load()
+        QTimer.singleShot(3000, self._check_update)
         if self.cfg["settings"].get("autostart_bots"): QTimer.singleShot(800, self._autostart)
         QApplication.instance().installEventFilter(self)
 
@@ -1041,10 +1046,21 @@ class App(QMainWindow):
         info = QVBoxLayout(); info.setSpacing(1); info.setContentsMargins(0,0,0,0)
         self._t1 = QLabel("Bot Manager")
         self._t1.setStyleSheet(f"color:{WHITE};font-size:13px;font-weight:700;background:transparent;border:none;")
-        self._t2 = QLabel("v1.0")
+        self._t2 = QLabel(f"v{APP_VERSION}")
         self._t2.setStyleSheet(f"color:{DARK};font-size:11px;background:transparent;border:none;")
         info.addWidget(self._t1); info.addWidget(self._t2)
         tl.addLayout(info)
+        tl.addStretch()
+        # Кнопка обновления (скрыта до проверки)
+        self._upd_btn = QPushButton("🔄 Обновить")
+        self._upd_btn.setVisible(False)
+        self._upd_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._upd_btn.setStyleSheet(
+            f"QPushButton{{background:{GREEN};color:#000;border:none;border-radius:8px;"
+            f"font-size:11px;font-weight:700;padding:4px 8px;}}"
+            f"QPushButton:hover{{background:#2db34a;}}")
+        self._upd_btn.clicked.connect(self._do_update)
+        tl.addWidget(self._upd_btn)
         sl.addWidget(top)
 
         # ── Прокручиваемое содержимое сайдбара ──
@@ -1179,6 +1195,57 @@ class App(QMainWindow):
         bh = self._bcol.height()
         self._bcol.move(self._sb.width() - self._bcol.width(), (h - bh) // 2)
         self._bcol.raise_()
+
+    # ── Автообновление ────────────────────────────────────────────────────────
+    def _check_update(self):
+        def _run():
+            try:
+                url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+                req = urllib.request.Request(url, headers={"User-Agent": "BotManager"})
+                with urllib.request.urlopen(req, timeout=10) as r:
+                    data = json.loads(r.read())
+                latest = data.get("tag_name", "").lstrip("v")
+                if latest and latest != APP_VERSION:
+                    # Найдём ссылку на установщик
+                    for asset in data.get("assets", []):
+                        if asset["name"].endswith(".exe"):
+                            self._upd_url = asset["browser_download_url"]
+                            self._upd_ver = latest
+                            # Обновляем UI в главном потоке
+                            QMetaObject.invokeMethod(self, "_show_update_btn",
+                                                     Qt.ConnectionType.QueuedConnection)
+                            break
+            except Exception:
+                pass
+        threading.Thread(target=_run, daemon=True).start()
+
+    @pyqtSlot()
+    def _show_update_btn(self):
+        self._upd_btn.setText(f"🔄 v{self._upd_ver}")
+        self._upd_btn.setVisible(True)
+        if self.cfg["settings"].get("win_notifications"):
+            self.tray.showMessage("Bot Manager",
+                f"Доступно обновление v{self._upd_ver}",
+                QSystemTrayIcon.MessageIcon.Information, 4000)
+
+    def _do_update(self):
+        self._upd_btn.setText("⏳ Скачиваю...")
+        self._upd_btn.setEnabled(False)
+        def _run():
+            try:
+                tmp = tempfile.mktemp(suffix=".exe", prefix="BotManager_Setup_")
+                urllib.request.urlretrieve(self._upd_url, tmp)
+                subprocess.Popen([tmp], shell=True)
+                QMetaObject.invokeMethod(self, "_quit",
+                                         Qt.ConnectionType.QueuedConnection)
+            except Exception as e:
+                QMetaObject.invokeMethod(self._upd_btn, "setText",
+                                         Qt.ConnectionType.QueuedConnection,
+                                         Q_ARG(str, "❌ Ошибка"))
+                QMetaObject.invokeMethod(self._upd_btn, "setEnabled",
+                                         Qt.ConnectionType.QueuedConnection,
+                                         Q_ARG(bool, True))
+        threading.Thread(target=_run, daemon=True).start()
 
     def _tray(self):
         self.tray = QSystemTrayIcon(self)
