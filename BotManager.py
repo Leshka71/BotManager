@@ -652,22 +652,28 @@ class SetPage(QWidget):
         self.bot_autostart_changed.emit(bot.id, val)
 
     def _select_all(self):
-        for bot in self._bots:
+        ids = []
+        for bot in list(self._bots):
             t = self._bot_toggles.get(bot.id)
             d = self._bot_dots.get(bot.id)
             if t:
                 t.setChecked(True)
                 if d: d.set(GREEN)
-                self.bot_autostart_changed.emit(bot.id, True)
+                ids.append((bot.id, True))
+        for bot_id, val in ids:
+            self.bot_autostart_changed.emit(bot_id, val)
 
     def _select_none(self):
-        for bot in self._bots:
+        ids = []
+        for bot in list(self._bots):
             t = self._bot_toggles.get(bot.id)
             d = self._bot_dots.get(bot.id)
             if t:
                 t.setChecked(False)
                 if d: d.set(DARK)
-                self.bot_autostart_changed.emit(bot.id, False)
+                ids.append((bot.id, False))
+        for bot_id, val in ids:
+            self.bot_autostart_changed.emit(bot_id, val)
 
     def _on_check_update_clicked(self):
         self._upd_check_btn.setEnabled(False)
@@ -1308,16 +1314,15 @@ class App(QMainWindow):
                 tmp = tempfile.mktemp(suffix=".exe", prefix="BotManager_Setup_")
                 urllib.request.urlretrieve(self._upd_url, tmp)
                 subprocess.Popen([tmp], shell=True)
-                QMetaObject.invokeMethod(self, "_quit",
-                                         Qt.ConnectionType.QueuedConnection)
-            except Exception as e:
-                QMetaObject.invokeMethod(self._upd_btn, "setText",
-                                         Qt.ConnectionType.QueuedConnection,
-                                         Q_ARG(str, "❌ Ошибка"))
-                QMetaObject.invokeMethod(self._upd_btn, "setEnabled",
-                                         Qt.ConnectionType.QueuedConnection,
-                                         Q_ARG(bool, True))
+                QMetaObject.invokeMethod(self, "_quit", Qt.ConnectionType.QueuedConnection)
+            except Exception:
+                QMetaObject.invokeMethod(self, "_upd_reset_btn", Qt.ConnectionType.QueuedConnection)
         threading.Thread(target=_run, daemon=True).start()
+
+    @pyqtSlot()
+    def _upd_reset_btn(self):
+        self._upd_btn.setText("❌ Ошибка")
+        self._upd_btn.setEnabled(True)
 
     def _tray(self):
         self.tray = QSystemTrayIcon(self)
@@ -1378,7 +1383,12 @@ class App(QMainWindow):
             if bot.id == bot_id: bot.autostart = val; break
         for d in self.cfg["bots"]:
             if d.get("id") == bot_id: d["autostart"] = val; break
-        save_config(self.cfg)
+        # Сохраняем с небольшой задержкой чтобы батчевые вызовы не конфликтовали
+        if not getattr(self, '_save_timer', None):
+            self._save_timer = QTimer(self)
+            self._save_timer.setSingleShot(True)
+            self._save_timer.timeout.connect(lambda: save_config(self.cfg))
+        self._save_timer.start(200)
 
     def _show(self, tab):
         self.cur = tab
