@@ -1025,6 +1025,10 @@ class App(QMainWindow):
         self.cfg = load_config(); self.bots = []; self.pages = {}; self.navs = {}
         self.cur = None; self._compact = False
         self._build(); self._tray(); self._load()
+        # Таймер для отслеживания сигнала показа окна от второго экземпляра
+        self._signal_timer = QTimer(self)
+        self._signal_timer.timeout.connect(self._check_show_signal)
+        self._signal_timer.start(500)
         QTimer.singleShot(3000, self._check_update)
         if self.cfg["settings"].get("autostart_bots"): QTimer.singleShot(800, self._autostart)
         QApplication.instance().installEventFilter(self)
@@ -1195,6 +1199,12 @@ class App(QMainWindow):
         bh = self._bcol.height()
         self._bcol.move(self._sb.width() - self._bcol.width(), (h - bh) // 2)
         self._bcol.raise_()
+
+    def _check_show_signal(self):
+        if _SIGNAL_FILE.exists():
+            try: _SIGNAL_FILE.unlink()
+            except: pass
+            self._show_win()
 
     # ── Автообновление ────────────────────────────────────────────────────────
     def _check_update(self):
@@ -1420,15 +1430,13 @@ class App(QMainWindow):
             if page: page.set_status("stopped"); page.add_log("⏹ Завершён")
             self._dot(bot, DARK)
 
+_SIGNAL_FILE = Path(tempfile.gettempdir()) / "BotManager_show_signal"
+
 if __name__ == "__main__":
-    # ── Single instance через Windows Mutex ───────────────────────────────────
+    # ── Single instance через Windows Mutex + файл-сигнал ─────────────────────
     _mutex = ctypes.windll.kernel32.CreateMutexW(None, False, "BotManagerSingleInstanceMutex")
     if ctypes.windll.kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
-        # Находим окно по заголовку и выдвигаем на передний план
-        _hwnd = ctypes.windll.user32.FindWindowW(None, "Bot Manager")
-        if _hwnd:
-            ctypes.windll.user32.ShowWindow(_hwnd, 5)       # SW_SHOW (работает и для скрытых)
-            ctypes.windll.user32.SetForegroundWindow(_hwnd)
+        _SIGNAL_FILE.touch()   # сигнал первому экземпляру — покажи окно
         sys.exit(0)
 
     app = QApplication(sys.argv); app.setStyle("Fusion")
