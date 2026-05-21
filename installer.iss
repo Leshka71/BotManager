@@ -1,0 +1,45 @@
+#define MyAppName "Bot Manager"
+#define MyAppVersion "1.0.0"
+#define MyAppPublisher "Lesha"
+#define MyAppExeName "BotManager.exe"
+#define MyAppDir "C:\Users\Lеша\Desktop\jkhk\dist\BotManager"
+#define MyIcon "C:\Users\Lеша\Desktop\jkhk\icon.ico"
+
+[Setup]
+AppId={{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}
+AppName={#MyAppName}
+AppVersion={#MyAppVersion}
+AppPublisher={#MyAppPublisher}
+DefaultDirName={autopf}\{#MyAppName}
+DefaultGroupName={#MyAppName}
+AllowNoIcons=yes
+OutputDir=C:\Users\Lеша\Desktop\jkhk\dist
+OutputBaseFilename=BotManager_Setup
+Compression=lzma2
+SolidCompression=yes
+WizardStyle=modern
+PrivilegesRequired=lowest
+PrivilegesRequiredOverridesAllowed=dialog
+DisableProgramGroupPage=yes
+ShowLanguageDialog=no
+SetupIconFile={#MyIcon}
+UninstallDisplayIcon={app}\{#MyAppExeName}
+WizardImageFile=compiler:WizModernImage.bmp
+WizardSmallImageFile=compiler:WizModernSmallImage.bmp
+
+[Languages]
+Name: "russian"; MessagesFile: "compiler:Languages\Russian.isl"
+
+[Tasks]
+Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: checked
+
+[Files]
+Source: "{#MyAppDir}\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#MyAppDir}\_internal\*"; DestDir: "{app}\_internal"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+[Icons]
+Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\_internal\icon.ico"
+Name: "{autodesktop}\{#MyAppName}";  Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\_internal\icon.ico"; Tasks: desktopicon
+
+[Run]
+Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
