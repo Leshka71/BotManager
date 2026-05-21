@@ -1455,8 +1455,19 @@ class App(QMainWindow):
     def _stop(self, bot):
         bot._alive = False; bot.status = "stopped"
         if bot.process:
-            try: bot.process.terminate(); bot.process.wait(timeout=3)
-            except: pass
+            pid = bot.process.pid
+            try:
+                # Убиваем весь дерево процессов принудительно (/f = force, /t = tree)
+                subprocess.run(
+                    ['taskkill', '/f', '/t', '/pid', str(pid)],
+                    capture_output=True, timeout=5
+                )
+            except Exception:
+                try: bot.process.kill()
+                except: pass
+            finally:
+                try: bot.process.wait(timeout=2)
+                except: pass
             bot.process = None
         bot.start_t = None
         page = self.pages.get(bot.id)
