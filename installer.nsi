@@ -34,6 +34,9 @@ VIAddVersionKey /LANG=0 "FileDescription" "Bot Manager Installer"
 
 Section "Bot Manager" SecMain
   SectionIn RO
+  ; Завершаем запущенный процесс если есть
+  nsExec::Exec 'taskkill /f /im BotManager.exe'
+  Sleep 1000
   SetOutPath "$INSTDIR"
   File "C:\Users\Lеша\Desktop\jkhk\dist\BotManager\BotManager.exe"
   SetOutPath "$INSTDIR\_internal"

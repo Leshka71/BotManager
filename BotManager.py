@@ -1313,7 +1313,9 @@ class App(QMainWindow):
             try:
                 tmp = tempfile.mktemp(suffix=".exe", prefix="BotManager_Setup_")
                 urllib.request.urlretrieve(self._upd_url, tmp)
-                subprocess.Popen([tmp], shell=True)
+                # Запускаем установщик через 3 сек — после того как приложение закроется
+                cmd = f'cmd /c timeout /t 3 /nobreak >nul && start "" "{tmp}"'
+                subprocess.Popen(cmd, shell=True, creationflags=subprocess.CREATE_NO_WINDOW)
                 QMetaObject.invokeMethod(self, "_quit", Qt.ConnectionType.QueuedConnection)
             except Exception:
                 QMetaObject.invokeMethod(self, "_upd_reset_btn", Qt.ConnectionType.QueuedConnection)
