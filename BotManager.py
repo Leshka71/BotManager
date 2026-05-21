@@ -1349,11 +1349,6 @@ class App(QMainWindow):
         else: self._quit()
 
     def changeEvent(self, e):
-        # Кнопка _ (свернуть) тоже уходит в трей если включено
-        if (e.type() == QEvent.Type.WindowStateChange and
-                self.windowState() & Qt.WindowState.WindowMinimized and
-                self.cfg["settings"].get("minimize_to_tray")):
-            e.ignore(); QTimer.singleShot(0, self.hide)
         super().changeEvent(e)
 
     def _quit(self):
