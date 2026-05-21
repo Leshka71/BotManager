@@ -47,7 +47,7 @@ LOG    = "#111111"
 HOVER  = "rgba(255,255,255,0.08)"
 SEL    = "rgba(255,255,255,0.12)"
 
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.0.1"
 GITHUB_REPO = "Leshka71/BotManager"
 
 QSS = f"""
@@ -1427,7 +1427,7 @@ if __name__ == "__main__":
         # Находим окно по заголовку и выдвигаем на передний план
         _hwnd = ctypes.windll.user32.FindWindowW(None, "Bot Manager")
         if _hwnd:
-            ctypes.windll.user32.ShowWindow(_hwnd, 9)       # SW_RESTORE
+            ctypes.windll.user32.ShowWindow(_hwnd, 5)       # SW_SHOW (работает и для скрытых)
             ctypes.windll.user32.SetForegroundWindow(_hwnd)
         sys.exit(0)
 
