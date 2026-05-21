@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-import sys, os, json, subprocess, time, winreg, random, ctypes
+import sys, os, json, subprocess, time, winreg, random, ctypes, atexit
 import urllib.request, tempfile, threading
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtCore import QUrl
@@ -19,6 +19,73 @@ else:
     RES_DIR = Path(__file__).parent
 
 CONFIG_FILE = APP_DIR / "manager_config.json"
+
+# ── Windows Job Object: убивает все дочерние процессы при закрытии BotManager ─
+_job_handle = None
+
+def _init_job_object():
+    global _job_handle
+    try:
+        import ctypes.wintypes
+        kernel32 = ctypes.windll.kernel32
+        _job_handle = kernel32.CreateJobObjectW(None, None)
+        if not _job_handle:
+            return
+        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000
+        JobObjectExtendedLimitInformation   = 9
+
+        class _BASIC(ctypes.Structure):
+            _fields_ = [
+                ("PerProcessUserTimeLimit", ctypes.c_int64),
+                ("PerJobUserTimeLimit",     ctypes.c_int64),
+                ("LimitFlags",             ctypes.wintypes.DWORD),
+                ("MinimumWorkingSetSize",  ctypes.c_size_t),
+                ("MaximumWorkingSetSize",  ctypes.c_size_t),
+                ("ActiveProcessLimit",     ctypes.wintypes.DWORD),
+                ("Affinity",               ctypes.c_size_t),
+                ("PriorityClass",          ctypes.wintypes.DWORD),
+                ("SchedulingClass",        ctypes.wintypes.DWORD),
+            ]
+
+        class _IO(ctypes.Structure):
+            _fields_ = [(n, ctypes.c_uint64) for n in (
+                "ReadOperationCount","WriteOperationCount","OtherOperationCount",
+                "ReadTransferCount","WriteTransferCount","OtherTransferCount",
+            )]
+
+        class _EXT(ctypes.Structure):
+            _fields_ = [
+                ("BasicLimitInformation", _BASIC),
+                ("IoInfo",                _IO),
+                ("ProcessMemoryLimit",    ctypes.c_size_t),
+                ("JobMemoryLimit",        ctypes.c_size_t),
+                ("PeakProcessMemoryUsed", ctypes.c_size_t),
+                ("PeakJobMemoryUsed",     ctypes.c_size_t),
+            ]
+
+        info = _EXT()
+        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        kernel32.SetInformationJobObject(
+            _job_handle, JobObjectExtendedLimitInformation,
+            ctypes.byref(info), ctypes.sizeof(info)
+        )
+    except Exception:
+        _job_handle = None
+
+def _assign_to_job(pid):
+    if not _job_handle:
+        return
+    try:
+        kernel32 = ctypes.windll.kernel32
+        PROCESS_ALL_ACCESS = 0x1F0FFF
+        h = kernel32.OpenProcess(PROCESS_ALL_ACCESS, False, pid)
+        if h:
+            kernel32.AssignProcessToJobObject(_job_handle, h)
+            kernel32.CloseHandle(h)
+    except Exception:
+        pass
+
+_init_job_object()
 
 def load_config():
     if CONFIG_FILE.exists():
@@ -1439,6 +1506,7 @@ class App(QMainWindow):
             env = {**os.environ,"PYTHONIOENCODING":"utf-8","PYTHONUTF8":"1"}
             bot.process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 cwd=str(Path(path).parent), creationflags=subprocess.CREATE_NO_WINDOW, env=env)
+            _assign_to_job(bot.process.pid)
             bot.start_t = time.time(); bot.errors = 0; bot._alive = True
             page = self.pages.get(bot.id)
             if page: page.set_status("running"); page.add_log(f"▶ Запущен (PID {bot.process.pid})")
@@ -1525,4 +1593,10 @@ if __name__ == "__main__":
         sys.exit(0)
 
     app = QApplication(sys.argv); app.setStyle("Fusion")
-    win = App(); win.show(); sys.exit(app.exec())
+    win = App()
+    atexit.register(lambda: [
+        subprocess.run(['taskkill', '/f', '/t', '/pid', str(b.process.pid)],
+                       capture_output=True, timeout=3)
+        for b in win.bots if b.process and b.process.poll() is None
+    ])
+    win.show(); sys.exit(app.exec())
