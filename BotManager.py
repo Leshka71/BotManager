@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-import sys, os, json, subprocess, time, winreg, random, ctypes, atexit
+import sys, os, json, subprocess, time, winreg, random, ctypes
 import urllib.request, tempfile, threading
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtCore import QUrl
@@ -114,7 +114,7 @@ LOG    = "#111111"
 HOVER  = "rgba(255,255,255,0.08)"
 SEL    = "rgba(255,255,255,0.12)"
 
-APP_VERSION = "1.0.7"
+APP_VERSION = "1.0.8"
 GITHUB_REPO = "Leshka71/BotManager"
 
 QSS = f"""
@@ -149,7 +149,7 @@ def btn(text, w=None, h=32, cls=None):
     b = QPushButton(text); b.setFixedHeight(h)
     if w: b.setFixedWidth(w)
     if cls: b.setProperty("class", cls); b.setStyleSheet(
-        f"QPushButton{{background:{'#32d74b' if cls=='green' else 'rgba(255,69,58,0.18)'};border:none;color:{'#000' if cls=='green' else RED};border-radius:10px;padding:6px 16px;font-size:13px;font-weight:{'600' if cls=='green' else '500'};min-height:0;}}"
+        f"QPushButton{{background:{'#34C759' if cls=='green' else 'rgba(255,69,58,0.18)'};border:none;color:{'white' if cls=='green' else RED};border-radius:10px;padding:6px 16px;font-size:13px;font-weight:{'600' if cls=='green' else '500'};min-height:0;}}"
         f"QPushButton:hover{{background:{'#2ec945' if cls=='green' else 'rgba(255,69,58,0.28)'};}} QPushButton:pressed{{background:{'#28b83e' if cls=='green' else 'rgba(255,69,58,0.12)'};}}")
     return b
 
@@ -199,6 +199,14 @@ class Toggle(QWidget):
         d = self.H - self.PAD * 2
         x = float((self.W - self.PAD - d) if self._on else self.PAD)
         y = float(self.PAD)
+
+        # Shadow layer under knob
+        for i in range(3, 0, -1):
+            sh = QPainterPath()
+            sh.addEllipse(QRectF(x - 0.5, y + i * 0.5, d + 1, d + 1))
+            p.setBrush(QColor(0, 0, 0, 18))
+            p.drawPath(sh)
+
         knob = QPainterPath()
         knob.addEllipse(QRectF(x, y, d, d))
         p.setBrush(QColor("white"))
@@ -506,10 +514,13 @@ class AddPage(QWidget):
         self.cr = self._toggle_row(cl3, "Автоперезапуск при падении", True)
         cl.addWidget(card3)
 
-        ab = QPushButton("Добавить бота"); ab.setFixedHeight(48)
-        ab.setStyleSheet(f"QPushButton{{background:{GREEN};border:none;color:#000;"
-                         f"border-radius:12px;font-size:15px;font-weight:700;min-height:0;}}"
-                         f"QPushButton:hover{{background:#2ec945;}}")
+        ab = QPushButton("Добавить бота"); ab.setFixedHeight(46)
+        ab.setStyleSheet(
+            f"QPushButton{{background:rgba(52,199,89,0.12);border:1px solid rgba(52,199,89,0.30);"
+            f"border-radius:12px;color:{GREEN};font-size:14px;font-weight:600;min-height:0;}}"
+            f"QPushButton:hover{{background:rgba(52,199,89,0.18);border-color:rgba(52,199,89,0.50);}}"
+            f"QPushButton:pressed{{background:rgba(52,199,89,0.08);}}"
+        )
         ab.clicked.connect(self._add); cl.addWidget(ab)
         sc.setWidget(w); root.addWidget(sc)
 
@@ -1424,7 +1435,19 @@ class App(QMainWindow):
         super().changeEvent(e)
 
     def _quit(self):
-        for b in self.bots: self._stop(b)
+        pids = [b.process.pid for b in self.bots
+                if b.process and b.process.poll() is None]
+        for b in self.bots:
+            b._alive = False; b.status = "stopped"; b.process = None
+        def _kill():
+            for pid in pids:
+                try:
+                    subprocess.run(['taskkill', '/f', '/t', '/pid', str(pid)],
+                        capture_output=True, timeout=5,
+                        creationflags=subprocess.CREATE_NO_WINDOW)
+                except: pass
+        if pids:
+            threading.Thread(target=_kill, daemon=False).start()
         QApplication.quit()
 
     def _load(self):
@@ -1527,7 +1550,8 @@ class App(QMainWindow):
             pid = bot.process.pid
             try:
                 subprocess.run(['taskkill', '/f', '/t', '/pid', str(pid)],
-                               capture_output=True, timeout=5)
+                               capture_output=True, timeout=5,
+                               creationflags=subprocess.CREATE_NO_WINDOW)
             except Exception:
                 try: bot.process.kill()
                 except: pass
@@ -1535,13 +1559,6 @@ class App(QMainWindow):
                 try: bot.process.wait(timeout=2)
                 except: pass
             bot.process = None
-        # Убиваем все оставшиеся процессы с таким именем (например старый TorrServer)
-        if exe_name:
-            try:
-                subprocess.run(['taskkill', '/f', '/im', exe_name],
-                               capture_output=True, timeout=5)
-            except Exception:
-                pass
         bot.start_t = None
         page = self.pages.get(bot.id)
         if page: page.set_status("stopped"); page.add_log("⏹ Остановлен")
@@ -1599,9 +1616,7 @@ if __name__ == "__main__":
 
     app = QApplication(sys.argv); app.setStyle("Fusion")
     win = App()
-    atexit.register(lambda: [
-        subprocess.run(['taskkill', '/f', '/t', '/pid', str(b.process.pid)],
-                       capture_output=True, timeout=3)
-        for b in win.bots if b.process and b.process.poll() is None
-    ])
-    win.show(); sys.exit(app.exec())
+    win.show()
+    code = app.exec()
+    # Job Object убивает все дочерние процессы при выходе автоматически
+    sys.exit(code)

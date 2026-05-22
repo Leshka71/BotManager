@@ -1,5 +1,5 @@
 #define MyAppName "Bot Manager"
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "1.0.8"
 #define MyAppPublisher "Lesha"
 #define MyAppExeName "BotManager.exe"
 #define MyAppDir "C:\Users\Lеша\Desktop\jkhk\dist\BotManager"
@@ -31,7 +31,7 @@ WizardSmallImageFile=compiler:WizModernSmallImage.bmp
 Name: "russian"; MessagesFile: "compiler:Languages\Russian.isl"
 
 [Tasks]
-Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: checked
+Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
 
 [Files]
 Source: "{#MyAppDir}\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
