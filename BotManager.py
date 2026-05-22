@@ -593,14 +593,22 @@ class AddPage(QWidget):
 # ── Страница настроек ─────────────────────────────────────────────────────────
 class SetPage(QWidget):
     changed              = pyqtSignal(dict)
-    bot_autostart_changed = pyqtSignal(str, bool)   # bot_id, value
+    bot_autostart_changed = pyqtSignal(str, bool)
     check_update_requested = pyqtSignal()
+    install_update_requested = pyqtSignal()
     _CARD = "QWidget{background:#2c2c2e;border-radius:12px;border:none;}"
     _TR   = "QWidget{background:transparent;border:none;border-radius:0;}"
+    _BTN_DEFAULT = (f"QPushButton{{background:#3a3a3c;border:none;color:#fff;border-radius:8px;"
+                    f"font-size:12px;font-weight:600;padding:0 12px;}}"
+                    f"QPushButton:hover{{background:#48484a;}}")
+    _BTN_GREEN   = (f"QPushButton{{background:#34C759;border:none;color:#000;border-radius:8px;"
+                    f"font-size:12px;font-weight:600;padding:0 12px;}}"
+                    f"QPushButton:hover{{background:#2db34a;}}")
 
     def __init__(self, s, bots):
         super().__init__(); self.s = s; self._bots = bots
         self._bot_toggles = {}; self._bot_dots = {}
+        self._update_mode = False
         root = QVBoxLayout(self); root.setContentsMargins(0,0,0,0); root.setSpacing(0)
         hdr = QWidget(); hdr.setFixedHeight(56)
         hdr.setStyleSheet(f"background:{BG};border-bottom:1px solid {LINE};")
@@ -645,10 +653,7 @@ class SetPage(QWidget):
         self._upd_check_btn = QPushButton("Проверить обновления")
         self._upd_check_btn.setFixedHeight(32)
         self._upd_check_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._upd_check_btn.setStyleSheet(
-            f"QPushButton{{background:#3a3a3c;border:none;color:{WHITE};border-radius:8px;"
-            f"font-size:12px;font-weight:600;padding:0 12px;}}"
-            f"QPushButton:hover{{background:#48484a;}}")
+        self._upd_check_btn.setStyleSheet(self._BTN_DEFAULT)
         self._upd_check_btn.clicked.connect(self._on_check_update_clicked)
 
         upd_rl.addWidget(ver_lbl)
@@ -759,14 +764,34 @@ class SetPage(QWidget):
             self.bot_autostart_changed.emit(bot_id, val)
 
     def _on_check_update_clicked(self):
+        if self._update_mode:
+            self._upd_check_btn.setText("⏳ Скачиваю...")
+            self._upd_check_btn.setEnabled(False)
+            self.install_update_requested.emit()
+            return
         self._upd_check_btn.setEnabled(False)
         self._upd_status.setText("Проверяю...")
         self._upd_status.setStyleSheet(f"color:{GRAY};font-size:12px;background:transparent;border:none;")
         self.check_update_requested.emit()
 
+    def show_update_available(self, ver):
+        self._update_mode = True
+        self._upd_status.setText("")
+        self._upd_check_btn.setText(f"🔄 Обновить v{ver}")
+        self._upd_check_btn.setStyleSheet(self._BTN_GREEN)
+        self._upd_check_btn.setEnabled(True)
+
     def set_update_status(self, text, color):
+        self._update_mode = False
+        self._upd_check_btn.setText("Проверить обновления")
+        self._upd_check_btn.setStyleSheet(self._BTN_DEFAULT)
         self._upd_status.setText(text)
         self._upd_status.setStyleSheet(f"color:{color};font-size:12px;background:transparent;border:none;")
+        self._upd_check_btn.setEnabled(True)
+
+    def set_download_error(self):
+        self._upd_check_btn.setText("❌ Ошибка — попробовать снова")
+        self._upd_check_btn.setStyleSheet(self._BTN_DEFAULT)
         self._upd_check_btn.setEnabled(True)
 
     # ── Хелперы ───────────────────────────────────────────────────────────────
@@ -1186,16 +1211,6 @@ class App(QMainWindow):
         info.addWidget(self._t1); info.addWidget(self._t2)
         tl.addLayout(info)
         tl.addStretch()
-        # Кнопка обновления (скрыта до проверки)
-        self._upd_btn = QPushButton("🔄 Обновить")
-        self._upd_btn.setVisible(False)
-        self._upd_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._upd_btn.setStyleSheet(
-            f"QPushButton{{background:{GREEN};color:#000;border:none;border-radius:8px;"
-            f"font-size:11px;font-weight:700;padding:4px 8px;}}"
-            f"QPushButton:hover{{background:#2db34a;}}")
-        self._upd_btn.clicked.connect(self._do_update)
-        tl.addWidget(self._upd_btn)
         sl.addWidget(top)
 
         # ── Прокручиваемое содержимое сайдбара ──
@@ -1276,6 +1291,7 @@ class App(QMainWindow):
         self._setp.changed.connect(self._on_set)
         self._setp.bot_autostart_changed.connect(self._on_bot_autostart)
         self._setp.check_update_requested.connect(lambda: self._check_update(manual=True))
+        self._setp.install_update_requested.connect(self._do_update)
         self.stack.addWidget(self._setp)
         self._homep = HomePage(); self.stack.addWidget(self._homep)
         self._snakep = SnakePage(); self.stack.addWidget(self._snakep)
@@ -1382,21 +1398,17 @@ class App(QMainWindow):
 
     @pyqtSlot()
     def _show_update_btn(self):
-        self._upd_btn.setText(f"🔄 v{self._upd_ver}")
-        self._upd_btn.setVisible(True)
+        self._setp.show_update_available(self._upd_ver)
         if self.cfg["settings"].get("win_notifications"):
             self.tray.showMessage("Bot Manager",
                 f"Доступно обновление v{self._upd_ver}",
                 QSystemTrayIcon.MessageIcon.Information, 4000)
 
     def _do_update(self):
-        self._upd_btn.setText("⏳ Скачиваю...")
-        self._upd_btn.setEnabled(False)
         def _run():
             try:
                 tmp = tempfile.mktemp(suffix=".exe", prefix="BotManager_Setup_")
                 urllib.request.urlretrieve(self._upd_url, tmp)
-                # Запускаем установщик через 3 сек — после того как приложение закроется
                 cmd = f'cmd /c timeout /t 3 /nobreak >nul && start "" "{tmp}"'
                 subprocess.Popen(cmd, shell=True, creationflags=subprocess.CREATE_NO_WINDOW)
                 QMetaObject.invokeMethod(self, "_quit", Qt.ConnectionType.QueuedConnection)
@@ -1406,8 +1418,7 @@ class App(QMainWindow):
 
     @pyqtSlot()
     def _upd_reset_btn(self):
-        self._upd_btn.setText("❌ Ошибка")
-        self._upd_btn.setEnabled(True)
+        self._setp.set_download_error()
 
     def _tray(self):
         self.tray = QSystemTrayIcon(self)
