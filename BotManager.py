@@ -115,7 +115,7 @@ LOG    = "#111111"
 HOVER  = "rgba(255,255,255,0.08)"
 SEL    = "rgba(255,255,255,0.12)"
 
-APP_VERSION = "1.2.1"
+APP_VERSION = "1.2.2"
 GITHUB_REPO = "Leshka71/BotManager"
 
 QSS = f"""
@@ -716,7 +716,8 @@ class BotPage(QWidget):
                 result = subprocess.run(
                     py.split() + [path, "broadcast", text],
                     capture_output=True, text=True, timeout=90,
-                    cwd=str(Path(path).parent)
+                    cwd=str(Path(path).parent),
+                    creationflags=subprocess.CREATE_NO_WINDOW
                 )
                 return result.stdout + result.stderr
             except subprocess.TimeoutExpired:
@@ -733,9 +734,10 @@ class BotPage(QWidget):
             elif output.startswith("timeout"):
                 _set_status("⚠ Таймаут (90 сек)", YELLOW)
             elif output.startswith("error:"):
-                _set_status("❌ Ошибка запуска", RED)
+                _set_status(f"❌ {output[6:90]}", RED)
             else:
-                _set_status("⚠ Проверь консоль", YELLOW)
+                err = output.strip().splitlines()[-1] if output.strip() else "нет вывода"
+                _set_status(f"❌ {err[:80]}", RED)
 
         def _thread():
             out = _run()
