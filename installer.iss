@@ -1,5 +1,5 @@
 #define MyAppName "Bot Manager"
-#define MyAppVersion "1.0.8"
+#define MyAppVersion "1.1.0"
 #define MyAppPublisher "Lesha"
 #define MyAppExeName "BotManager.exe"
 #define MyAppDir "C:\Users\Lеша\Desktop\jkhk\dist\BotManager"
@@ -10,7 +10,6 @@ AppId={{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
-DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 AllowNoIcons=yes
 OutputDir=C:\Users\Lеша\Desktop\jkhk\dist
@@ -18,14 +17,13 @@ OutputBaseFilename=BotManager_Setup
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
-PrivilegesRequired=lowest
-PrivilegesRequiredOverridesAllowed=dialog
+PrivilegesRequired=admin
+DefaultDirName={commonpf64}\{#MyAppName}
 DisableProgramGroupPage=yes
+CloseApplications=yes
 ShowLanguageDialog=no
 SetupIconFile={#MyIcon}
 UninstallDisplayIcon={app}\{#MyAppExeName}
-WizardImageFile=compiler:WizModernImage.bmp
-WizardSmallImageFile=compiler:WizModernSmallImage.bmp
 
 [Languages]
 Name: "russian"; MessagesFile: "compiler:Languages\Russian.isl"
