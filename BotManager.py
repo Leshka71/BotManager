@@ -115,7 +115,7 @@ LOG    = "#111111"
 HOVER  = "rgba(255,255,255,0.08)"
 SEL    = "rgba(255,255,255,0.12)"
 
-APP_VERSION = "1.2.2"
+APP_VERSION = "1.2.3"
 GITHUB_REPO = "Leshka71/BotManager"
 
 QSS = f"""
@@ -713,11 +713,15 @@ class BotPage(QWidget):
 
         def _run():
             try:
+                si = subprocess.STARTUPINFO()
+                si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                si.wShowWindow = 0  # SW_HIDE
                 result = subprocess.run(
                     py.split() + [path, "broadcast", text],
                     capture_output=True, text=True, timeout=90,
                     cwd=str(Path(path).parent),
-                    creationflags=subprocess.CREATE_NO_WINDOW
+                    creationflags=subprocess.CREATE_NO_WINDOW,
+                    startupinfo=si
                 )
                 return result.stdout + result.stderr
             except subprocess.TimeoutExpired:
