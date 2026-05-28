@@ -455,6 +455,45 @@ class BotPage(QWidget):
         self.tg_restart = self._bot_toggle_row(cl1c, "Автоперезапуск при падении", bot.auto_restart)
         cl1.addWidget(card3)
 
+        self._sec_lbl(cl1, "РАССЫЛКА")
+        card4 = QWidget(); card4.setStyleSheet(self._CARD_SETTINGS)
+        cl1d = QVBoxLayout(card4); cl1d.setContentsMargins(0, 0, 0, 0); cl1d.setSpacing(0)
+
+        # Текстовый ввод
+        txt_wrap = QWidget(); txt_wrap.setStyleSheet("QWidget{background:transparent;border:none;}")
+        tw_l = QVBoxLayout(txt_wrap); tw_l.setContentsMargins(16, 10, 16, 10)
+        self._bc_text = QTextEdit()
+        self._bc_text.setPlaceholderText("Введи текст для рассылки...")
+        self._bc_text.setFixedHeight(90)
+        self._bc_text.setStyleSheet(
+            f"QTextEdit{{background:#1c1c1e;border:1px solid #3a3a3c;border-radius:8px;"
+            f"color:#ccc;font-size:13px;padding:6px 10px;}}"
+            f"QTextEdit:focus{{border-color:{BLUE};}}"
+        )
+        tw_l.addWidget(self._bc_text)
+        cl1d.addWidget(txt_wrap)
+        cl1d.addWidget(self._div())
+
+        # Кнопка отправки
+        btn_row = QWidget(); btn_row.setFixedHeight(52)
+        btn_row.setStyleSheet("QWidget{background:transparent;border:none;}")
+        btn_rl = QHBoxLayout(btn_row); btn_rl.setContentsMargins(16, 0, 16, 0)
+        self._bc_status = QLabel("")
+        self._bc_status.setStyleSheet(f"color:{GRAY};font-size:12px;background:transparent;border:none;")
+        self._bc_btn = QPushButton("📢 Отправить всем")
+        self._bc_btn.setFixedHeight(36)
+        self._bc_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._bc_btn.setStyleSheet(
+            f"QPushButton{{background:{GREEN};border:none;color:#000;border-radius:8px;"
+            f"font-size:12px;font-weight:600;padding:0 14px;}}"
+            f"QPushButton:hover{{background:#2db34a;}}"
+            f"QPushButton:disabled{{background:#3a3a3c;color:{GRAY};}}"
+        )
+        self._bc_btn.clicked.connect(self._do_broadcast)
+        btn_rl.addWidget(self._bc_status); btn_rl.addStretch(); btn_rl.addWidget(self._bc_btn)
+        cl1d.addWidget(btn_row)
+        cl1.addWidget(card4)
+
         sc1.setWidget(w1); self._tabs.addWidget(sc1)
 
         # Подключаем сигналы
@@ -617,6 +656,58 @@ class BotPage(QWidget):
         self.bot.autostart   = self.tg_auto.isChecked()
         self.bot.auto_restart= self.tg_restart.isChecked()
         self.sig_settings_changed.emit(self.bot)
+
+    def _do_broadcast(self):
+        path = self.bot.path.strip()
+        text = self._bc_text.toPlainText().strip()
+
+        def _set_status(msg, color=GRAY):
+            self._bc_status.setText(msg)
+            self._bc_status.setStyleSheet(
+                f"color:{color};font-size:12px;background:transparent;border:none;")
+
+        if not path:
+            _set_status("⚠ Укажи путь к боту в настройках", RED); return
+        if not text:
+            _set_status("⚠ Введи текст", RED); return
+
+        self._bc_btn.setEnabled(False)
+        self._bc_btn.setText("Отправляю...")
+        _set_status("⏳ Рассылка идёт...", GRAY)
+
+        py = self.bot.python if self.bot.python else "python"
+
+        def _run():
+            try:
+                result = subprocess.run(
+                    py.split() + [path, "broadcast", text],
+                    capture_output=True, text=True, timeout=90,
+                    cwd=str(Path(path).parent)
+                )
+                return result.stdout + result.stderr
+            except subprocess.TimeoutExpired:
+                return "timeout"
+            except Exception as e:
+                return f"error:{e}"
+
+        def _finish(output):
+            self._bc_btn.setEnabled(True)
+            self._bc_btn.setText("📢 Отправить всем")
+            if "Рассылка завершена" in output:
+                _set_status("✅ Отправлено!", GREEN)
+                self._bc_text.clear()
+            elif output.startswith("timeout"):
+                _set_status("⚠ Таймаут (90 сек)", YELLOW)
+            elif output.startswith("error:"):
+                _set_status("❌ Ошибка запуска", RED)
+            else:
+                _set_status("⚠ Проверь консоль", YELLOW)
+
+        def _thread():
+            out = _run()
+            QTimer.singleShot(0, lambda: _finish(out))
+
+        threading.Thread(target=_thread, daemon=True).start()
 
 # ── Страница добавления ───────────────────────────────────────────────────────
 class AddPage(QWidget):
@@ -788,7 +879,6 @@ class SetPage(QWidget):
             ("Сворачивать в трей",    "minimize_to_tray"),
             ("Автоперезапуск ботов",  "auto_restart"),
         ])
-        self._build_broadcast_section(cl)
 
         # ── ОБНОВЛЕНИЯ ──
         upd_lbl = QLabel("ОБНОВЛЕНИЯ")
@@ -1003,131 +1093,6 @@ class SetPage(QWidget):
         rl.addWidget(lb); rl.addStretch(); rl.addWidget(e)
         if pl is not None: pl.addWidget(row)
         return e
-
-    def _build_broadcast_section(self, cl):
-        lbl = QLabel("РАССЫЛКА")
-        lbl.setStyleSheet(f"color:{GRAY};font-size:11px;letter-spacing:1px;font-weight:600;"
-                          f"background:transparent;border:none;margin-bottom:2px;")
-        cl.addWidget(lbl)
-
-        card = QWidget(); card.setStyleSheet(self._CARD)
-        vl = QVBoxLayout(card); vl.setContentsMargins(0, 0, 0, 0); vl.setSpacing(0)
-
-        # ── Строка: путь к боту ──────────────────────────────────────────────────
-        path_row = QWidget(); path_row.setFixedHeight(44)
-        path_row.setStyleSheet(self._TR)
-        path_rl = QHBoxLayout(path_row); path_rl.setContentsMargins(16, 0, 12, 0); path_rl.setSpacing(8)
-        path_rl.addWidget(label("Путь к боту", 13, WHITE))
-
-        self._bc_path = QLineEdit(self.s.get("broadcast_bot_path", ""))
-        self._bc_path.setPlaceholderText("C:/Users/.../bot.py")
-        self._bc_path.setStyleSheet(
-            f"QLineEdit{{background:#1c1c1e;border:1px solid #3a3a3c;border-radius:6px;"
-            f"color:#ccc;font-size:12px;padding:0 8px;}}"
-            f"QLineEdit:focus{{border-color:{BLUE};}}"
-        )
-        self._bc_path.textChanged.connect(lambda v: self._inp("broadcast_bot_path", v))
-
-        browse_btn = QPushButton("…"); browse_btn.setFixedSize(28, 28)
-        browse_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        browse_btn.setStyleSheet(self._BTN_DEFAULT)
-        browse_btn.clicked.connect(self._browse_bot_path)
-
-        path_rl.addWidget(self._bc_path, 1)
-        path_rl.addWidget(browse_btn)
-        vl.addWidget(path_row)
-        vl.addWidget(self._div())
-
-        # ── Текстовый ввод сообщения ─────────────────────────────────────────────
-        txt_wrap = QWidget(); txt_wrap.setStyleSheet(self._TR)
-        tw_l = QVBoxLayout(txt_wrap); tw_l.setContentsMargins(16, 10, 16, 10)
-        self._bc_text = QTextEdit()
-        self._bc_text.setPlaceholderText("Введи текст для рассылки...")
-        self._bc_text.setFixedHeight(90)
-        self._bc_text.setStyleSheet(
-            f"QTextEdit{{background:#1c1c1e;border:1px solid #3a3a3c;border-radius:8px;"
-            f"color:#ccc;font-size:13px;padding:6px 10px;}}"
-            f"QTextEdit:focus{{border-color:{BLUE};}}"
-        )
-        tw_l.addWidget(self._bc_text)
-        vl.addWidget(txt_wrap)
-        vl.addWidget(self._div())
-
-        # ── Кнопка отправки ──────────────────────────────────────────────────────
-        btn_row = QWidget(); btn_row.setFixedHeight(52)
-        btn_row.setStyleSheet(self._TR)
-        btn_rl = QHBoxLayout(btn_row); btn_rl.setContentsMargins(16, 0, 16, 0)
-
-        self._bc_status = QLabel("")
-        self._bc_status.setStyleSheet(
-            f"color:{GRAY};font-size:12px;background:transparent;border:none;")
-
-        self._bc_btn = QPushButton("📢 Отправить всем")
-        self._bc_btn.setFixedHeight(36)
-        self._bc_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._bc_btn.setStyleSheet(self._BTN_GREEN)
-        self._bc_btn.clicked.connect(self._do_broadcast)
-
-        btn_rl.addWidget(self._bc_status)
-        btn_rl.addStretch()
-        btn_rl.addWidget(self._bc_btn)
-        vl.addWidget(btn_row)
-
-        cl.addWidget(card)
-
-    def _browse_bot_path(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Выбери bot.py", "", "Python файлы (*.py)")
-        if path:
-            self._bc_path.setText(path.replace("/", "/"))
-
-    def _do_broadcast(self):
-        path = self._bc_path.text().strip()
-        text = self._bc_text.toPlainText().strip()
-
-        def _set_status(msg, color=GRAY):
-            self._bc_status.setText(msg)
-            self._bc_status.setStyleSheet(
-                f"color:{color};font-size:12px;background:transparent;border:none;")
-
-        if not path:
-            _set_status("⚠ Укажи путь к боту", RED); return
-        if not text:
-            _set_status("⚠ Введи текст", RED); return
-
-        self._bc_btn.setEnabled(False)
-        self._bc_btn.setText("Отправляю...")
-        _set_status("⏳ Рассылка идёт...", GRAY)
-
-        def run():
-            try:
-                result = subprocess.run(
-                    ["python", path, "broadcast", text],
-                    capture_output=True, text=True, timeout=90,
-                    cwd=str(Path(path).parent)
-                )
-                return result.stdout + result.stderr
-            except subprocess.TimeoutExpired:
-                return "timeout"
-            except Exception as e:
-                return f"error:{e}"
-
-        def finish(output):
-            self._bc_btn.setEnabled(True)
-            self._bc_btn.setText("📢 Отправить всем")
-            if "Рассылка завершена" in output:
-                _set_status("✅ Отправлено!", GREEN)
-            elif output.startswith("timeout"):
-                _set_status("⚠ Таймаут (90 сек)", YELLOW)
-            elif output.startswith("error:"):
-                _set_status("❌ Ошибка запуска", RED)
-            else:
-                _set_status("⚠ Проверь консоль", YELLOW)
-
-        def _thread():
-            out = run()
-            QTimer.singleShot(0, lambda: finish(out))
-
-        threading.Thread(target=_thread, daemon=True).start()
 
     def _build_vk_section(self, cl):
         lbl = QLabel("VK УВЕДОМЛЕНИЯ")
