@@ -92,7 +92,8 @@ def load_config():
         try: return json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
         except: pass
     return {"bots": [], "settings": {"autostart_app":False,"autostart_bots":True,
-        "win_notifications":True,"sound":False,"minimize_to_tray":True,"auto_restart":True}}
+        "win_notifications":True,"sound":False,"minimize_to_tray":True,"auto_restart":True,
+        "vk_notifications":False,"vk_token":"","vk_user_id":""}}
 
 def save_config(cfg):
     CONFIG_FILE.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -114,7 +115,7 @@ LOG    = "#111111"
 HOVER  = "rgba(255,255,255,0.08)"
 SEL    = "rgba(255,255,255,0.12)"
 
-APP_VERSION = "1.0.8"
+APP_VERSION = "1.0.9"
 GITHUB_REPO = "Leshka71/BotManager"
 
 QSS = f"""
@@ -303,6 +304,7 @@ class Bot:
         self.process = None; self.reader = None
         self.status = "stopped"; self.start_t = None
         self.events = 0; self.errors = 0; self._alive = True
+        self.restart_fails = 0
     def cfg(self):
         return {"id":self.id,"name":self.name,"path":self.path,
                 "args":self.args,"python":self.python,"autostart":self.autostart}
@@ -315,8 +317,13 @@ class Bot:
 class BotPage(QWidget):
     sig_start = pyqtSignal(object); sig_stop = pyqtSignal(object)
     sig_restart = pyqtSignal(object); sig_delete = pyqtSignal(object)
-    _CARD = "QWidget{background:#2c2c2e;border-radius:12px;border:none;}"
-    _TR   = "QWidget{background:transparent;border:none;border-radius:0;}"
+    sig_settings_changed = pyqtSignal(object)
+    _CARD  = "QWidget{background:#2c2c2e;border-radius:12px;border:none;}"
+    _TR    = "QWidget{background:transparent;border:none;border-radius:0;}"
+    _FIELD = (f"QLineEdit{{background:transparent;border:none;border-radius:0;"
+              f"color:#fff;font-size:14px;padding:0;}} "
+              f"QLineEdit:focus{{border:none;background:transparent;}}")
+    _CARD_SETTINGS = "QWidget{background:#2c2c2e;border-radius:12px;border:1px solid #3a3a3c;}"
 
     def __init__(self, bot):
         super().__init__(); self.bot = bot
@@ -331,7 +338,17 @@ class BotPage(QWidget):
         self.title.setStyleSheet(f"color:{WHITE};font-size:15px;font-weight:700;background:transparent;border:none;")
         hl.addWidget(self.title)
         self.badge = QLabel("остановлен"); self.badge.setFixedHeight(22)
-        self._badge_style("stopped"); hl.addWidget(self.badge); hl.addStretch()
+        self._badge_style("stopped"); hl.addWidget(self.badge)
+        # ── Вкладки ──
+        hl.addSpacing(12)
+        self._tab_log = QPushButton("Логи");       self._tab_log.setFixedHeight(28)
+        self._tab_set = QPushButton("⚙ Настройки"); self._tab_set.setFixedHeight(28)
+        self._tab_log.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._tab_set.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._tab_log.clicked.connect(lambda: self._switch_tab(0))
+        self._tab_set.clicked.connect(lambda: self._switch_tab(1))
+        hl.addWidget(self._tab_log); hl.addWidget(self._tab_set)
+        hl.addStretch()
         self.b_run = QPushButton("Старт"); self.b_run.setFixedSize(80, 32)
         self.b_run.setStyleSheet(
             f"QPushButton{{background:{GREEN};border:none;color:#000;border-radius:10px;"
@@ -348,15 +365,18 @@ class BotPage(QWidget):
         b_del.clicked.connect(lambda: self.sig_delete.emit(self.bot)); hl.addWidget(b_del)
         root.addWidget(hdr)
 
-        # ── Прокручиваемый контент ──
-        sc = QScrollArea(); sc.setWidgetResizable(True)
-        sc.setStyleSheet("border:none;background:transparent;")
-        w = QWidget(); w.setStyleSheet(f"background:{BG};")
-        cl = QVBoxLayout(w); cl.setContentsMargins(16,16,16,16); cl.setSpacing(16)
-        cl.setAlignment(Qt.AlignmentFlag.AlignTop)
+        # ── Стек вкладок ──
+        self._tabs = QStackedWidget(); root.addWidget(self._tabs)
 
-        # Секция: статус — три колонки в одну строку
-        self._sec(cl, "СТАТУС")
+        # ── Вкладка 0: Логи ──────────────────────────────────────────────────
+        sc0 = QScrollArea(); sc0.setWidgetResizable(True)
+        sc0.setStyleSheet("border:none;background:transparent;")
+        w0 = QWidget(); w0.setStyleSheet(f"background:{BG};")
+        cl0 = QVBoxLayout(w0); cl0.setContentsMargins(16,16,16,16); cl0.setSpacing(16)
+        cl0.setAlignment(Qt.AlignmentFlag.AlignTop)
+
+        # Секция: статус
+        self._sec(cl0, "СТАТУС")
         c1 = QWidget(); c1.setStyleSheet(self._CARD); c1.setFixedHeight(60)
         l1 = QHBoxLayout(c1); l1.setContentsMargins(0,0,0,0); l1.setSpacing(0)
         self._up_lbl = self._stat_col(l1, "Аптайм", "—", WHITE)
@@ -364,10 +384,10 @@ class BotPage(QWidget):
         self._ev_lbl = self._stat_col(l1, "Событий", "0", GREEN)
         l1.addWidget(self._vdiv())
         self._er_lbl = self._stat_col(l1, "Ошибок", "0", RED)
-        cl.addWidget(c1)
+        cl0.addWidget(c1)
 
         # Секция: логи
-        self._sec(cl, "ЛОГИ")
+        self._sec(cl0, "ЛОГИ")
         c3 = QWidget(); c3.setStyleSheet(self._CARD)
         c3.setMinimumHeight(220)
         l3 = QVBoxLayout(c3); l3.setContentsMargins(0,0,0,0); l3.setSpacing(0)
@@ -383,16 +403,92 @@ class BotPage(QWidget):
             b.clicked.connect(fn); tbl.addWidget(b)
         l3.addWidget(tb)
         self.log_view = QTextEdit(); self.log_view.setReadOnly(True)
-        self.log_view.setStyleSheet("background:transparent;color:#ccc;border:none;"
-                                    "font-family:Consolas;font-size:13px;padding:10px;border-radius:0;")
-        l3.addWidget(self.log_view); cl.addWidget(c3)
-        sc.setWidget(w); root.addWidget(sc)
+        self.log_view.setStyleSheet("""
+            QTextEdit {
+                background: transparent; color: #ccc; border: none;
+                font-family: Consolas; font-size: 13px; padding: 10px 14px; border-radius: 0;
+            }
+            QScrollBar:vertical {
+                background: transparent; width: 6px;
+                margin: 4px 2px; border-radius: 3px;
+            }
+            QScrollBar::handle:vertical {
+                background: #484848; border-radius: 3px; min-height: 32px;
+            }
+            QScrollBar::handle:vertical:hover { background: #686868; }
+            QScrollBar::handle:vertical:pressed { background: #888; }
+            QScrollBar::sub-line:vertical, QScrollBar::add-line:vertical { height: 0; }
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: transparent; }
+        """)
+        l3.addWidget(self.log_view); cl0.addWidget(c3)
+        sc0.setWidget(w0); self._tabs.addWidget(sc0)
+
+        # ── Вкладка 1: Настройки ─────────────────────────────────────────────
+        sc1 = QScrollArea(); sc1.setWidgetResizable(True)
+        sc1.setStyleSheet("border:none;background:transparent;")
+        sc1.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        w1 = QWidget(); w1.setStyleSheet(f"background:{BG};")
+        cl1 = QVBoxLayout(w1); cl1.setContentsMargins(24,24,24,24); cl1.setSpacing(16)
+        cl1.setAlignment(Qt.AlignmentFlag.AlignTop)
+
+        self._sec_lbl(cl1, "ОСНОВНОЕ")
+        card1 = QWidget(); card1.setStyleSheet(self._CARD_SETTINGS)
+        cl1a = QVBoxLayout(card1); cl1a.setContentsMargins(0,0,0,0); cl1a.setSpacing(0)
+        self.e_name = self._edit_row(cl1a, "Название",       bot.name)
+        cl1a.addWidget(self._div())
+        self.e_path = self._edit_row_browse(cl1a,            bot.path)
+        cl1.addWidget(card1)
+
+        self._sec_lbl(cl1, "ДОПОЛНИТЕЛЬНО")
+        card2 = QWidget(); card2.setStyleSheet(self._CARD_SETTINGS)
+        cl1b = QVBoxLayout(card2); cl1b.setContentsMargins(0,0,0,0); cl1b.setSpacing(0)
+        self.e_args = self._edit_row(cl1b, "Аргументы",      bot.args,   "--arg value")
+        cl1b.addWidget(self._div())
+        self.e_py   = self._edit_row(cl1b, "Python команда", bot.python, "python")
+        cl1.addWidget(card2)
+
+        self._sec_lbl(cl1, "НАСТРОЙКИ")
+        card3 = QWidget(); card3.setStyleSheet(self._CARD_SETTINGS)
+        cl1c = QVBoxLayout(card3); cl1c.setContentsMargins(0,0,0,0); cl1c.setSpacing(0)
+        self.tg_auto    = self._bot_toggle_row(cl1c, "Автозапуск при старте",      bot.autostart)
+        cl1c.addWidget(self._div())
+        self.tg_restart = self._bot_toggle_row(cl1c, "Автоперезапуск при падении", bot.auto_restart)
+        cl1.addWidget(card3)
+
+        sc1.setWidget(w1); self._tabs.addWidget(sc1)
+
+        # Подключаем сигналы
+        self.e_name.textChanged.connect(self._on_field_changed)
+        self.e_path.textChanged.connect(self._on_field_changed)
+        self.e_args.textChanged.connect(self._on_field_changed)
+        self.e_py.textChanged.connect(self._on_field_changed)
+        self.tg_auto.toggled.connect(lambda v: self._on_field_changed())
+        self.tg_restart.toggled.connect(lambda v: self._on_field_changed())
+
+        self._switch_tab(0)
         self.tmr = QTimer(); self.tmr.timeout.connect(self._tick); self.tmr.start(5000)
+
+    def _switch_tab(self, idx):
+        self._tabs.setCurrentIndex(idx)
+        _on  = (f"QPushButton{{background:rgba(255,255,255,0.10);border:none;color:{WHITE};"
+                f"border-radius:7px;font-size:12px;font-weight:600;padding:0 10px;min-height:0;}}"
+                f"QPushButton:hover{{background:rgba(255,255,255,0.15);}}")
+        _off = (f"QPushButton{{background:transparent;border:none;color:{GRAY};"
+                f"border-radius:7px;font-size:12px;padding:0 10px;min-height:0;}}"
+                f"QPushButton:hover{{color:{WHITE};}}")
+        self._tab_log.setStyleSheet(_on  if idx == 0 else _off)
+        self._tab_set.setStyleSheet(_on  if idx == 1 else _off)
 
     def _sec(self, pl, t):
         l = QLabel(t)
         l.setStyleSheet(f"color:{GRAY};font-size:11px;letter-spacing:1px;font-weight:600;"
                         f"background:transparent;border:none;margin-bottom:2px;")
+        pl.addWidget(l)
+
+    def _sec_lbl(self, pl, t):
+        l = QLabel(t)
+        l.setStyleSheet(f"color:{GRAY};font-size:11px;letter-spacing:1px;font-weight:600;"
+                        f"background:transparent;border:none;margin-top:4px;margin-bottom:2px;")
         pl.addWidget(l)
 
     def _div(self):
@@ -460,9 +556,67 @@ class BotPage(QWidget):
         elif any(w in lu for w in ["✅","▶","ЗАПУЩЕН","CONNECTED","ONLINE"]): c = GREEN
         elif "INFO" in lu: c = GRAY
         else: c = "#aeaeb2"
+        sb = self.log_view.verticalScrollBar()
+        at_bottom = sb.value() >= sb.maximum() - 4
         self.log_view.append(f'<span style="color:#555">[{ts}]</span> <span style="color:{c}">{line}</span>')
-        sb = self.log_view.verticalScrollBar(); sb.setValue(sb.maximum())
+        if at_bottom: sb.setValue(sb.maximum())
         if any(w in lu for w in ["CLAIM","WATCH","ОТПРАВЛЕНО","→","СОБЫТИЕ"]): self.bot.events += 1
+
+    # ── Поля редактирования ───────────────────────────────────────────────────
+    def _edit_row(self, pl, lbl_text, value="", placeholder=""):
+        row = QWidget(); row.setFixedHeight(52)
+        row.setStyleSheet("QWidget{background:transparent;border:none;border-radius:0;}")
+        rl = QHBoxLayout(row); rl.setContentsMargins(16,0,16,0); rl.setSpacing(12)
+        lb = QLabel(lbl_text); lb.setFixedWidth(140)
+        lb.setStyleSheet(f"color:{WHITE};font-size:14px;background:transparent;border:none;")
+        e = QLineEdit(value); e.setPlaceholderText(placeholder); e.setFixedHeight(36)
+        e.setStyleSheet(self._FIELD); e.setAlignment(Qt.AlignmentFlag.AlignRight)
+        rl.addWidget(lb); rl.addWidget(e)
+        pl.addWidget(row); return e
+
+    def _edit_row_browse(self, pl, value=""):
+        row = QWidget(); row.setFixedHeight(52)
+        row.setStyleSheet("QWidget{background:transparent;border:none;border-radius:0;}")
+        rl = QHBoxLayout(row); rl.setContentsMargins(16,0,16,0); rl.setSpacing(12)
+        lb = QLabel("Файл (.py / .exe)"); lb.setFixedWidth(140)
+        lb.setStyleSheet(f"color:{WHITE};font-size:14px;background:transparent;border:none;")
+        e = QLineEdit(value); e.setPlaceholderText("Путь к файлу"); e.setFixedHeight(36)
+        e.setStyleSheet(self._FIELD); e.setAlignment(Qt.AlignmentFlag.AlignRight)
+        bb = QPushButton("Обзор"); bb.setFixedSize(70, 30)
+        bb.setStyleSheet(f"QPushButton{{background:#3a3a3c;border:none;color:{WHITE};"
+                         f"border-radius:7px;font-size:12px;min-height:0;}}"
+                         f"QPushButton:hover{{background:#48484a;}}")
+        bb.clicked.connect(lambda: self._browse_path(e))
+        rl.addWidget(lb); rl.addWidget(e); rl.addWidget(bb)
+        pl.addWidget(row); return e
+
+    def _bot_toggle_row(self, pl, text, on=True):
+        row = QWidget(); row.setFixedHeight(52)
+        row.setStyleSheet("QWidget{background:transparent;border:none;border-radius:0;}")
+        rl = QHBoxLayout(row); rl.setContentsMargins(16,0,16,0)
+        lb = QLabel(text)
+        lb.setStyleSheet(f"color:{WHITE};font-size:14px;background:transparent;border:none;")
+        tg = Toggle(on)
+        rl.addWidget(lb); rl.addStretch(); rl.addWidget(tg)
+        pl.addWidget(row); return tg
+
+    def _browse_path(self, field):
+        p, _ = QFileDialog.getOpenFileName(self, "Выбери файл", "",
+                                           "Python/Exe (*.py *.exe);;All (*)")
+        if p: field.setText(p)
+
+    def _on_field_changed(self):
+        name = self.e_name.text().strip()
+        if name:
+            self.bot.name = name
+            self.title.setText(name)
+        self.bot.path        = self.e_path.text().strip()
+        self.bot.args        = self.e_args.text().strip()
+        py = self.e_py.text().strip()
+        self.bot.python      = py if py else "python"
+        self.bot.autostart   = self.tg_auto.isChecked()
+        self.bot.auto_restart= self.tg_restart.isChecked()
+        self.sig_settings_changed.emit(self.bot)
 
 # ── Страница добавления ───────────────────────────────────────────────────────
 class AddPage(QWidget):
@@ -629,10 +783,12 @@ class SetPage(QWidget):
             ("Уведомления Windows", "win_notifications"),
             ("Звук при ошибке",     "sound"),
         ])
+        self._build_vk_section(cl)
         self._section(cl, "ИНТЕРФЕЙС", [
             ("Сворачивать в трей",    "minimize_to_tray"),
             ("Автоперезапуск ботов",  "auto_restart"),
         ])
+        self._build_broadcast_section(cl)
 
         # ── ОБНОВЛЕНИЯ ──
         upd_lbl = QLabel("ОБНОВЛЕНИЯ")
@@ -776,8 +932,9 @@ class SetPage(QWidget):
 
     def show_update_available(self, ver):
         self._update_mode = True
-        self._upd_status.setText("")
-        self._upd_check_btn.setText(f"🔄 Обновить v{ver}")
+        self._upd_status.setText(f"Доступно v{ver}")
+        self._upd_status.setStyleSheet(f"color:{GREEN};font-size:12px;background:transparent;border:none;")
+        self._upd_check_btn.setText(f"🔄 Обновить до v{ver}")
         self._upd_check_btn.setStyleSheet(self._BTN_GREEN)
         self._upd_check_btn.setEnabled(True)
 
@@ -825,6 +982,166 @@ class SetPage(QWidget):
         rl.addWidget(tg); return row
 
     def _tog(self, k, v): self.s[k] = v; self.changed.emit(self.s)
+
+    def _inp(self, k, v): self.s[k] = v; self.changed.emit(self.s)
+
+    def _row_input(self, pl, text, key, placeholder=""):
+        row = QWidget(); row.setFixedHeight(44)
+        row.setStyleSheet(self._TR)
+        rl = QHBoxLayout(row); rl.setContentsMargins(16, 0, 12, 0); rl.setSpacing(12)
+        lb = QLabel(text)
+        lb.setStyleSheet(f"color:{WHITE};font-size:13px;background:transparent;border:none;")
+        e = QLineEdit(self.s.get(key, ""))
+        e.setPlaceholderText(placeholder)
+        e.setFixedSize(190, 28)
+        e.setStyleSheet(
+            f"QLineEdit{{background:#1c1c1e;border:1px solid #3a3a3c;border-radius:6px;"
+            f"color:#ccc;font-size:12px;padding:0 8px;}}"
+            f"QLineEdit:focus{{border-color:{BLUE};}}"
+        )
+        e.textChanged.connect(lambda v, k=key: self._inp(k, v))
+        rl.addWidget(lb); rl.addStretch(); rl.addWidget(e)
+        if pl is not None: pl.addWidget(row)
+        return e
+
+    def _build_broadcast_section(self, cl):
+        lbl = QLabel("РАССЫЛКА")
+        lbl.setStyleSheet(f"color:{GRAY};font-size:11px;letter-spacing:1px;font-weight:600;"
+                          f"background:transparent;border:none;margin-bottom:2px;")
+        cl.addWidget(lbl)
+
+        card = QWidget(); card.setStyleSheet(self._CARD)
+        vl = QVBoxLayout(card); vl.setContentsMargins(0, 0, 0, 0); vl.setSpacing(0)
+
+        # ── Строка: путь к боту ──────────────────────────────────────────────────
+        path_row = QWidget(); path_row.setFixedHeight(44)
+        path_row.setStyleSheet(self._TR)
+        path_rl = QHBoxLayout(path_row); path_rl.setContentsMargins(16, 0, 12, 0); path_rl.setSpacing(8)
+        path_rl.addWidget(label("Путь к боту", 13, WHITE))
+
+        self._bc_path = QLineEdit(self.s.get("broadcast_bot_path", ""))
+        self._bc_path.setPlaceholderText("C:/Users/.../bot.py")
+        self._bc_path.setStyleSheet(
+            f"QLineEdit{{background:#1c1c1e;border:1px solid #3a3a3c;border-radius:6px;"
+            f"color:#ccc;font-size:12px;padding:0 8px;}}"
+            f"QLineEdit:focus{{border-color:{BLUE};}}"
+        )
+        self._bc_path.textChanged.connect(lambda v: self._inp("broadcast_bot_path", v))
+
+        browse_btn = QPushButton("…"); browse_btn.setFixedSize(28, 28)
+        browse_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        browse_btn.setStyleSheet(self._BTN_DEFAULT)
+        browse_btn.clicked.connect(self._browse_bot_path)
+
+        path_rl.addWidget(self._bc_path, 1)
+        path_rl.addWidget(browse_btn)
+        vl.addWidget(path_row)
+        vl.addWidget(self._div())
+
+        # ── Текстовый ввод сообщения ─────────────────────────────────────────────
+        txt_wrap = QWidget(); txt_wrap.setStyleSheet(self._TR)
+        tw_l = QVBoxLayout(txt_wrap); tw_l.setContentsMargins(16, 10, 16, 10)
+        self._bc_text = QTextEdit()
+        self._bc_text.setPlaceholderText("Введи текст для рассылки...")
+        self._bc_text.setFixedHeight(90)
+        self._bc_text.setStyleSheet(
+            f"QTextEdit{{background:#1c1c1e;border:1px solid #3a3a3c;border-radius:8px;"
+            f"color:#ccc;font-size:13px;padding:6px 10px;}}"
+            f"QTextEdit:focus{{border-color:{BLUE};}}"
+        )
+        tw_l.addWidget(self._bc_text)
+        vl.addWidget(txt_wrap)
+        vl.addWidget(self._div())
+
+        # ── Кнопка отправки ──────────────────────────────────────────────────────
+        btn_row = QWidget(); btn_row.setFixedHeight(52)
+        btn_row.setStyleSheet(self._TR)
+        btn_rl = QHBoxLayout(btn_row); btn_rl.setContentsMargins(16, 0, 16, 0)
+
+        self._bc_status = QLabel("")
+        self._bc_status.setStyleSheet(
+            f"color:{GRAY};font-size:12px;background:transparent;border:none;")
+
+        self._bc_btn = QPushButton("📢 Отправить всем")
+        self._bc_btn.setFixedHeight(36)
+        self._bc_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._bc_btn.setStyleSheet(self._BTN_GREEN)
+        self._bc_btn.clicked.connect(self._do_broadcast)
+
+        btn_rl.addWidget(self._bc_status)
+        btn_rl.addStretch()
+        btn_rl.addWidget(self._bc_btn)
+        vl.addWidget(btn_row)
+
+        cl.addWidget(card)
+
+    def _browse_bot_path(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Выбери bot.py", "", "Python файлы (*.py)")
+        if path:
+            self._bc_path.setText(path.replace("/", "/"))
+
+    def _do_broadcast(self):
+        path = self._bc_path.text().strip()
+        text = self._bc_text.toPlainText().strip()
+
+        def _set_status(msg, color=GRAY):
+            self._bc_status.setText(msg)
+            self._bc_status.setStyleSheet(
+                f"color:{color};font-size:12px;background:transparent;border:none;")
+
+        if not path:
+            _set_status("⚠ Укажи путь к боту", RED); return
+        if not text:
+            _set_status("⚠ Введи текст", RED); return
+
+        self._bc_btn.setEnabled(False)
+        self._bc_btn.setText("Отправляю...")
+        _set_status("⏳ Рассылка идёт...", GRAY)
+
+        def run():
+            try:
+                result = subprocess.run(
+                    ["python", path, "broadcast", text],
+                    capture_output=True, text=True, timeout=90,
+                    cwd=str(Path(path).parent)
+                )
+                return result.stdout + result.stderr
+            except subprocess.TimeoutExpired:
+                return "timeout"
+            except Exception as e:
+                return f"error:{e}"
+
+        def finish(output):
+            self._bc_btn.setEnabled(True)
+            self._bc_btn.setText("📢 Отправить всем")
+            if "Рассылка завершена" in output:
+                _set_status("✅ Отправлено!", GREEN)
+            elif output.startswith("timeout"):
+                _set_status("⚠ Таймаут (90 сек)", YELLOW)
+            elif output.startswith("error:"):
+                _set_status("❌ Ошибка запуска", RED)
+            else:
+                _set_status("⚠ Проверь консоль", YELLOW)
+
+        def _thread():
+            out = run()
+            QTimer.singleShot(0, lambda: finish(out))
+
+        threading.Thread(target=_thread, daemon=True).start()
+
+    def _build_vk_section(self, cl):
+        lbl = QLabel("VK УВЕДОМЛЕНИЯ")
+        lbl.setStyleSheet(f"color:{GRAY};font-size:11px;letter-spacing:1px;font-weight:600;"
+                          f"background:transparent;border:none;margin-bottom:2px;")
+        cl.addWidget(lbl)
+        card = QWidget(); card.setStyleSheet(self._CARD)
+        vl = QVBoxLayout(card); vl.setContentsMargins(0, 0, 0, 0); vl.setSpacing(0)
+        vl.addWidget(self._row("VK уведомления", "vk_notifications"))
+        vl.addWidget(self._div())
+        self._row_input(vl, "Токен группы", "vk_token", "vk1.a.XXXXX...")
+        vl.addWidget(self._div())
+        self._row_input(vl, "Ваш VK ID", "vk_user_id", "123456789")
+        cl.addWidget(card)
 
 # ── Змейка ────────────────────────────────────────────────────────────────────
 class SnakeWidget(QWidget):
@@ -1370,9 +1687,6 @@ class App(QMainWindow):
                             self._upd_ver = latest
                             QMetaObject.invokeMethod(self, "_show_update_btn",
                                                      Qt.ConnectionType.QueuedConnection)
-                            if manual:
-                                QMetaObject.invokeMethod(self, "_set_upd_status_new",
-                                                         Qt.ConnectionType.QueuedConnection)
                             break
                 else:
                     if manual:
@@ -1477,6 +1791,7 @@ class App(QMainWindow):
         page = BotPage(bot)
         page.sig_start.connect(self._start); page.sig_stop.connect(self._stop)
         page.sig_restart.connect(self._restart); page.sig_delete.connect(self._delete)
+        page.sig_settings_changed.connect(self._on_bot_settings_changed)
         self.stack.addWidget(page); self.pages[bot.id] = page
         self._setp.refresh_bots()
         if not self.cur: self._show(bot.id)
@@ -1492,6 +1807,27 @@ class App(QMainWindow):
             self._save_timer.setSingleShot(True)
             self._save_timer.timeout.connect(lambda: save_config(self.cfg))
         self._save_timer.start(200)
+
+    def _on_bot_settings_changed(self, bot):
+        # Обновляем название в сайдбаре
+        nav = self.navs.get(bot.id)
+        if nav: nav.lbl.setText(bot.name)
+        # Синхронизируем в конфиге
+        for d in self.cfg["bots"]:
+            if d.get("id") == bot.id:
+                d["name"]        = bot.name
+                d["path"]        = bot.path
+                d["args"]        = bot.args
+                d["python"]      = bot.python
+                d["autostart"]   = bot.autostart
+                d["auto_restart"]= bot.auto_restart
+                break
+        # Дебаунс-сохранение 500 мс
+        if not getattr(self, '_bot_cfg_save_timer', None):
+            self._bot_cfg_save_timer = QTimer(self)
+            self._bot_cfg_save_timer.setSingleShot(True)
+            self._bot_cfg_save_timer.timeout.connect(lambda: save_config(self.cfg))
+        self._bot_cfg_save_timer.start(500)
 
     def _show(self, tab):
         self.cur = tab
@@ -1537,7 +1873,7 @@ class App(QMainWindow):
         cmd = [path]+(bot.args.split() if bot.args else []) if path.lower().endswith(".exe") else \
               bot.python.split()+[path]+(bot.args.split() if bot.args else [])
         try:
-            env = {**os.environ,"PYTHONIOENCODING":"utf-8","PYTHONUTF8":"1"}
+            env = {**os.environ,"PYTHONIOENCODING":"utf-8","PYTHONUTF8":"1","PYTHONUNBUFFERED":"1"}
             bot.process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 cwd=str(Path(path).parent), creationflags=subprocess.CREATE_NO_WINDOW, env=env)
             _assign_to_job(bot.process.pid)
@@ -1549,6 +1885,8 @@ class App(QMainWindow):
             bot.reader.line.connect(lambda l, b=bot: self._log(b,l))
             bot.reader.done.connect(lambda b=bot: self._ended(b))
             bot.reader.start()
+            # Через 2 минуты стабильной работы — сбрасываем счётчик падений
+            QTimer.singleShot(120000, lambda b=bot: self._reset_fails(b))
         except Exception as ex:
             page = self.pages.get(bot.id)
             if page: page.add_log(f"✗ Ошибка: {ex}"); page.set_status("error")
@@ -1602,19 +1940,60 @@ class App(QMainWindow):
         page = self.pages.get(bot.id)
         if page: page.add_log(line)
 
+    def _send_vk(self, bot_name, status_text):
+        s = self.cfg["settings"]
+        if not s.get("vk_notifications"): return
+        token   = s.get("vk_token",   "").strip()
+        user_id = s.get("vk_user_id", "").strip()
+        if not token or not user_id: return
+        def _run():
+            try:
+                import urllib.parse
+                msg = f"⚠ Bot Manager\nБот «{bot_name}» {status_text}"
+                params = {
+                    "user_id":    user_id,
+                    "message":    msg,
+                    "random_id":  int(time.time() * 1000),
+                    "access_token": token,
+                    "v": "5.131",
+                }
+                url  = "https://api.vk.com/method/messages.send"
+                data = urllib.parse.urlencode(params).encode()
+                req  = urllib.request.Request(url, data=data,
+                       headers={"User-Agent": "BotManager/1.0"})
+                with urllib.request.urlopen(req, timeout=10) as r:
+                    resp = json.loads(r.read())
+                    if "error" in resp:
+                        print(f"VK ошибка {resp['error'].get('error_code')}: "
+                              f"{resp['error'].get('error_msg')}")
+            except Exception as ex:
+                print(f"VK уведомление не отправлено: {ex}")
+        threading.Thread(target=_run, daemon=True).start()
+
+    def _reset_fails(self, bot):
+        if bot.process and bot.process.poll() is None:
+            bot.restart_fails = 0
+
     def _ended(self, bot):
         if not bot._alive or bot.status == "stopped": return
         page = self.pages.get(bot.id)
         if bot.auto_restart and self.cfg["settings"].get("auto_restart", True):
-            if page: page.set_status("restarting"); page.add_log("⚠ Упал, перезапуск через 10 сек...")
+            bot.restart_fails += 1
+            if page:
+                page.set_status("restarting")
+                page.add_log(f"⚠ Упал ({bot.restart_fails}/3), перезапуск через 10 сек...")
             self._dot(bot, YELLOW)
             if self.cfg["settings"].get("win_notifications"):
                 self.tray.showMessage("Bot Manager", f"⚠ {bot.name} упал",
                     QSystemTrayIcon.MessageIcon.Warning, 3000)
+            if bot.restart_fails >= 3:
+                self._send_vk(bot.name, f"не запускается — 3 попытки подряд провалились")
+                bot.restart_fails = 0
             QTimer.singleShot(10000, lambda: self._start(bot) if bot._alive else None)
         else:
             if page: page.set_status("stopped"); page.add_log("⏹ Завершён")
             self._dot(bot, DARK)
+            self._send_vk(bot.name, "завершён")
 
 _SIGNAL_FILE = Path(tempfile.gettempdir()) / "BotManager_show_signal"
 
