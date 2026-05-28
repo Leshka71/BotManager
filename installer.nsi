@@ -25,10 +25,10 @@ RequestExecutionLevel admin
 
 !insertmacro MUI_LANGUAGE "Russian"
 
-VIProductVersion "1.1.0.0"
+VIProductVersion "1.2.0.0"
 VIAddVersionKey /LANG=0 "ProductName" "Bot Manager"
-VIAddVersionKey /LANG=0 "FileVersion" "1.1.0"
-VIAddVersionKey /LANG=0 "ProductVersion" "1.1.0"
+VIAddVersionKey /LANG=0 "FileVersion" "1.2.0"
+VIAddVersionKey /LANG=0 "ProductVersion" "1.2.0"
 VIAddVersionKey /LANG=0 "FileDescription" "Bot Manager Installer"
 
 Section "Bot Manager" SecMain
@@ -82,7 +82,7 @@ Section "Bot Manager" SecMain
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\BotManager" "UninstallString" '"$INSTDIR\uninstall.exe"'
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\BotManager" "DisplayIcon" "$INSTDIR\BotManager.exe"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\BotManager" "Publisher" "Lesha"
-  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\BotManager" "DisplayVersion" "1.1.0"
+  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\BotManager" "DisplayVersion" "1.2.0"
   WriteUninstaller "$INSTDIR\uninstall.exe"
 
   ; ── Ярлыки ─────────────────────────────────────────────────────────────────
