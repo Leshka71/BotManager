@@ -1,5 +1,5 @@
 #define MyAppName "Bot Manager"
-#define MyAppVersion "1.2.3"
+#define MyAppVersion "1.2.4"
 #define MyAppPublisher "Lesha"
 #define MyAppExeName "BotManager.exe"
 #define MyAppDir "C:\Users\Lеша\Desktop\jkhk\dist\BotManager"
