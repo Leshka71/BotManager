@@ -115,7 +115,7 @@ LOG    = "#111111"
 HOVER  = "rgba(255,255,255,0.08)"
 SEL    = "rgba(255,255,255,0.12)"
 
-APP_VERSION = "1.2.4"
+APP_VERSION = "1.2.5"
 GITHUB_REPO = "Leshka71/BotManager"
 
 QSS = f"""
@@ -711,55 +711,65 @@ class BotPage(QWidget):
 
         py = self.bot.python if self.bot.python else "python"
 
-        def _run():
+        def _log(line):
+            QTimer.singleShot(0, lambda l=line: self.add_log(f"[Рассылка] {l}"))
+
+        def _thread():
+            output_lines = []
             try:
                 si = subprocess.STARTUPINFO()
                 si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-                si.wShowWindow = 0  # SW_HIDE
-                result = subprocess.run(
+                si.wShowWindow = 0
+                proc = subprocess.Popen(
                     py.split() + [path, "broadcast", text],
-                    capture_output=True, text=True, timeout=180,
-                    cwd=str(Path(path).parent),
+                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                    text=True, cwd=str(Path(path).parent),
                     creationflags=subprocess.CREATE_NO_WINDOW,
                     startupinfo=si
                 )
-                return result.stdout + result.stderr
+                for line in proc.stdout:
+                    line = line.rstrip()
+                    if line:
+                        output_lines.append(line)
+                        _log(line)
+                proc.wait(timeout=180)
+                full = "\n".join(output_lines)
             except subprocess.TimeoutExpired:
-                return "timeout"
+                proc.kill()
+                full = "timeout"
+                _log("⚠ Таймаут 180 сек")
             except Exception as e:
-                return f"error:{e}"
+                full = f"error:{e}"
+                _log(f"❌ {e}")
 
-        def _finish(output):
-            self._bc_btn.setEnabled(True)
-            self._bc_btn.setText("📢 Отправить всем")
-            if output.startswith("timeout"):
-                _set_status("⚠ Таймаут — увеличь время ожидания", YELLOW)
-            elif output.startswith("error:"):
-                _set_status(f"❌ {output[6:90]}", RED)
-            elif "Рассылка завершена" in output:
-                # Парсим итог: TG: X/Y, VK: A/B
-                import re
-                m = re.search(r"TG: (\d+)/(\d+), VK: (\d+)/(\d+)", output)
-                if m:
-                    tg_ok, tg_total = int(m.group(1)), int(m.group(2))
-                    vk_ok, vk_total = int(m.group(3)), int(m.group(4))
-                    failed = (tg_total - tg_ok) + (vk_total - vk_ok)
-                    if failed == 0:
-                        _set_status(f"✅ Отправлено всем  TG:{tg_ok}  VK:{vk_ok}", GREEN)
+            import re
+            def _finish():
+                self._bc_btn.setEnabled(True)
+                self._bc_btn.setText("📢 Отправить всем")
+                if full.startswith("timeout"):
+                    _set_status("⚠ Таймаут", YELLOW)
+                elif full.startswith("error:"):
+                    _set_status(f"❌ {full[6:80]}", RED)
+                elif "Рассылка завершена" in full:
+                    m = re.search(r"TG: (\d+)/(\d+), VK: (\d+)/(\d+)", full)
+                    if m:
+                        tg_ok, tg_tot = int(m.group(1)), int(m.group(2))
+                        vk_ok, vk_tot = int(m.group(3)), int(m.group(4))
+                        failed = (tg_tot - tg_ok) + (vk_tot - vk_ok)
+                        if failed == 0:
+                            _set_status(f"✅ Все получили  TG:{tg_ok}  VK:{vk_ok}", GREEN)
+                        else:
+                            _set_status(f"⚠ TG:{tg_ok}/{tg_tot}  VK:{vk_ok}/{vk_tot}  ({failed} не дошло)", YELLOW)
                     else:
-                        _set_status(f"⚠ TG:{tg_ok}/{tg_total}  VK:{vk_ok}/{vk_total}  ({failed} не дошло)", YELLOW)
+                        _set_status("✅ Готово", GREEN)
+                    self._bc_text.clear()
+                elif not full.strip():
+                    _set_status("❌ Нет вывода — проверь путь к боту", RED)
                 else:
-                    _set_status("✅ Готово", GREEN)
-                self._bc_text.clear()
-            elif not output.strip():
-                _set_status("❌ Бот не вернул ответ — проверь путь", RED)
-            else:
-                err = output.strip().splitlines()[-1]
-                _set_status(f"❌ {err[:80]}", RED)
+                    last = full.strip().splitlines()[-1]
+                    _set_status(f"❌ {last[:80]}", RED)
 
-        def _thread():
-            out = _run()
-            QTimer.singleShot(0, lambda: _finish(out))
+            QTimer.singleShot(0, _finish)
 
         threading.Thread(target=_thread, daemon=True).start()
 
