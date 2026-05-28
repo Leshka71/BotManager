@@ -301,13 +301,15 @@ class Bot:
         self.python = d.get("python", "python")
         self.autostart = d.get("autostart", True)
         self.auto_restart = d.get("auto_restart", True)
+        self.broadcast_path = d.get("broadcast_path", "")
         self.process = None; self.reader = None
         self.status = "stopped"; self.start_t = None
         self.events = 0; self.errors = 0; self._alive = True
         self.restart_fails = 0
     def cfg(self):
         return {"id":self.id,"name":self.name,"path":self.path,
-                "args":self.args,"python":self.python,"autostart":self.autostart}
+                "args":self.args,"python":self.python,"autostart":self.autostart,
+                "auto_restart":self.auto_restart,"broadcast_path":self.broadcast_path}
     def uptime(self):
         if not self.start_t: return "—"
         s = int(time.time()-self.start_t); h,m = s//3600,(s%3600)//60
@@ -459,7 +461,30 @@ class BotPage(QWidget):
         card4 = QWidget(); card4.setStyleSheet(self._CARD_SETTINGS)
         cl1d = QVBoxLayout(card4); cl1d.setContentsMargins(0, 0, 0, 0); cl1d.setSpacing(0)
 
-        # Текстовый ввод
+        # ── Путь к боту рассылки ─────────────────────────────────────────────────
+        path_row = QWidget(); path_row.setFixedHeight(44)
+        path_row.setStyleSheet("QWidget{background:transparent;border:none;}")
+        path_rl = QHBoxLayout(path_row); path_rl.setContentsMargins(16, 0, 12, 0); path_rl.setSpacing(8)
+        path_lbl = QLabel("Бот")
+        path_lbl.setStyleSheet(f"color:{WHITE};font-size:13px;background:transparent;border:none;min-width:30px;")
+        _field_ss = (f"QLineEdit{{background:#1c1c1e;border:1px solid #3a3a3c;border-radius:6px;"
+                     f"color:#ccc;font-size:12px;padding:0 8px;}}"
+                     f"QLineEdit:focus{{border-color:{BLUE};}}")
+        self._bc_path_edit = QLineEdit(bot.broadcast_path)
+        self._bc_path_edit.setPlaceholderText("C:/Users/.../bot.py")
+        self._bc_path_edit.setStyleSheet(_field_ss)
+        self._bc_path_edit.textChanged.connect(self._on_bc_path_changed)
+        bc_browse = QPushButton("…"); bc_browse.setFixedSize(28, 28)
+        bc_browse.setCursor(Qt.CursorShape.PointingHandCursor)
+        bc_browse.setStyleSheet("QPushButton{background:#3a3a3c;border:none;color:#fff;border-radius:6px;"
+                                "font-size:13px;font-weight:600;min-height:0;padding:0;}"
+                                "QPushButton:hover{background:#48484a;}")
+        bc_browse.clicked.connect(self._browse_bc_path)
+        path_rl.addWidget(path_lbl); path_rl.addWidget(self._bc_path_edit, 1); path_rl.addWidget(bc_browse)
+        cl1d.addWidget(path_row)
+        cl1d.addWidget(self._div())
+
+        # ── Текстовый ввод ───────────────────────────────────────────────────────
         txt_wrap = QWidget(); txt_wrap.setStyleSheet("QWidget{background:transparent;border:none;}")
         tw_l = QVBoxLayout(txt_wrap); tw_l.setContentsMargins(16, 10, 16, 10)
         self._bc_text = QTextEdit()
@@ -474,7 +499,7 @@ class BotPage(QWidget):
         cl1d.addWidget(txt_wrap)
         cl1d.addWidget(self._div())
 
-        # Кнопка отправки
+        # ── Кнопка отправки ──────────────────────────────────────────────────────
         btn_row = QWidget(); btn_row.setFixedHeight(52)
         btn_row.setStyleSheet("QWidget{background:transparent;border:none;}")
         btn_rl = QHBoxLayout(btn_row); btn_rl.setContentsMargins(16, 0, 16, 0)
@@ -657,8 +682,17 @@ class BotPage(QWidget):
         self.bot.auto_restart= self.tg_restart.isChecked()
         self.sig_settings_changed.emit(self.bot)
 
+    def _on_bc_path_changed(self, v):
+        self.bot.broadcast_path = v.strip()
+        self.sig_settings_changed.emit(self.bot)
+
+    def _browse_bc_path(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Выбери bot.py", "", "Python файлы (*.py)")
+        if path:
+            self._bc_path_edit.setText(path)
+
     def _do_broadcast(self):
-        path = self.bot.path.strip()
+        path = self._bc_path_edit.text().strip()
         text = self._bc_text.toPlainText().strip()
 
         def _set_status(msg, color=GRAY):
