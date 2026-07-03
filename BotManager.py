@@ -87,12 +87,18 @@ def _assign_to_job(pid):
 
 _init_job_object()
 
+# Строки в логе бота, которые НЕ считаем ошибкой (обычные обрывы сети со штатным
+# автопереподключением) — редактируются через manager_config.json без пересборки .exe.
+DEFAULT_BENIGN_ERROR_PATTERNS = ["CONNECTION TO REMOTE HOST WAS LOST", "PING PONG FAILED"]
+BENIGN_ERROR_PATTERNS = list(DEFAULT_BENIGN_ERROR_PATTERNS)
+
 def load_config():
     if CONFIG_FILE.exists():
         try: return json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
         except: pass
     return {"bots": [], "settings": {"autostart_app":False,"autostart_bots":True,
-        "win_notifications":True,"sound":False,"minimize_to_tray":True,"auto_restart":True}}
+        "win_notifications":True,"sound":False,"minimize_to_tray":True,"auto_restart":True,
+        "benign_error_patterns":list(DEFAULT_BENIGN_ERROR_PATTERNS)}}
 
 def save_config(cfg):
     try:
@@ -619,8 +625,13 @@ class BotPage(QWidget):
 
     def add_log(self, line):
         ts = datetime.now().strftime("%H:%M:%S"); lu = line.upper()
-        if any(w in lu for w in ["ERROR","ОШИБКА","КРИТИЧ","EXCEPTION","FAILED","TRACEBACK"]):
+        # BENIGN_ERROR_PATTERNS редактируется в manager_config.json (ключ
+        # "benign_error_patterns") без пересборки — обрывы связи со штатным
+        # автопереподключением не считаем "ошибкой" в статистике.
+        if any(w in lu for w in ["ERROR","ОШИБКА","КРИТИЧ","EXCEPTION","FAILED","TRACEBACK"]) \
+           and not any(w in lu for w in BENIGN_ERROR_PATTERNS):
             c = RED; self.bot.errors += 1
+        elif any(w in lu for w in BENIGN_ERROR_PATTERNS): c = ORANGE
         elif any(w in lu for w in ["WARN","⚠"]): c = ORANGE
         elif any(w in lu for w in ["✅","▶","ЗАПУЩЕН","CONNECTED","ONLINE"]): c = GREEN
         elif "INFO" in lu: c = GRAY
@@ -1503,6 +1514,8 @@ class App(QMainWindow):
         if _ico.exists(): self.setWindowIcon(QIcon(str(_ico)))
         self.setStyleSheet(QSS)
         self.cfg = load_config(); self.bots = []; self.pages = {}; self.navs = {}
+        global BENIGN_ERROR_PATTERNS
+        BENIGN_ERROR_PATTERNS = self.cfg["settings"].get("benign_error_patterns", DEFAULT_BENIGN_ERROR_PATTERNS)
         self.cur = None; self._compact = False
         self._build(); self._tray(); self._load()
         # Таймер для отслеживания сигнала показа окна от второго экземпляра
