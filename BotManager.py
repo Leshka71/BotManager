@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-import sys, os, json, subprocess, time, winreg, random, ctypes
+import sys, os, json, subprocess, time, winreg, random, ctypes, traceback
 import urllib.request, tempfile, threading
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtCore import QUrl
@@ -92,11 +92,13 @@ def load_config():
         try: return json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
         except: pass
     return {"bots": [], "settings": {"autostart_app":False,"autostart_bots":True,
-        "win_notifications":True,"sound":False,"minimize_to_tray":True,"auto_restart":True,
-        "vk_notifications":False,"vk_token":"","vk_user_id":""}}
+        "win_notifications":True,"sound":False,"minimize_to_tray":True,"auto_restart":True}}
 
 def save_config(cfg):
-    CONFIG_FILE.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+    try:
+        CONFIG_FILE.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception as e:
+        print(f"ERROR: не удалось сохранить конфиг: {e}")
 
 # ── Цвета ──────────────────────────────────────────────────────────────────────
 BG     = "#1c1c1e"
@@ -115,7 +117,7 @@ LOG    = "#111111"
 HOVER  = "rgba(255,255,255,0.08)"
 SEL    = "rgba(255,255,255,0.12)"
 
-APP_VERSION = "1.2.5"
+APP_VERSION = "1.3.0"
 GITHUB_REPO = "Leshka71/BotManager"
 
 QSS = f"""
@@ -320,6 +322,7 @@ class BotPage(QWidget):
     sig_start = pyqtSignal(object); sig_stop = pyqtSignal(object)
     sig_restart = pyqtSignal(object); sig_delete = pyqtSignal(object)
     sig_settings_changed = pyqtSignal(object)
+    sig_broadcast_line = pyqtSignal(str); sig_broadcast_done = pyqtSignal(str)
     _CARD  = "QWidget{background:#2c2c2e;border-radius:12px;border:none;}"
     _TR    = "QWidget{background:transparent;border:none;border-radius:0;}"
     _FIELD = (f"QLineEdit{{background:transparent;border:none;border-radius:0;"
@@ -528,6 +531,8 @@ class BotPage(QWidget):
         self.e_py.textChanged.connect(self._on_field_changed)
         self.tg_auto.toggled.connect(lambda v: self._on_field_changed())
         self.tg_restart.toggled.connect(lambda v: self._on_field_changed())
+        self.sig_broadcast_line.connect(lambda l: self.add_log(f"[Рассылка] {l}"))
+        self.sig_broadcast_done.connect(self._on_broadcast_done)
 
         self._switch_tab(0)
         self.tmr = QTimer(); self.tmr.timeout.connect(self._tick); self.tmr.start(5000)
@@ -590,7 +595,7 @@ class BotPage(QWidget):
             f"font-size:12px;font-weight:600;border:none;")
 
     def _toggle(self):
-        if self.bot.status == "running": self.sig_stop.emit(self.bot)
+        if self.bot.status in ("running", "restarting"): self.sig_stop.emit(self.bot)
         else: self.sig_start.emit(self.bot)
 
     def _tick(self):
@@ -602,8 +607,8 @@ class BotPage(QWidget):
         self.bot.status = s; self._badge_style(s)
         colors = {"running": GREEN, "stopped": DARK, "error": RED, "restarting": YELLOW}
         self.dot.set(colors.get(s, DARK))
-        self.b_run.setText("Стоп" if s == "running" else "Старт")
-        if s == "running":
+        self.b_run.setText("Стоп" if s in ("running", "restarting") else "Старт")
+        if s in ("running", "restarting"):
             self.b_run.setStyleSheet(
                 f"QPushButton{{background:{RED};border:none;color:#fff;border-radius:10px;"
                 f"font-size:13px;font-weight:700;min-height:0;}} QPushButton:hover{{background:#d93b31;}}")
@@ -665,7 +670,8 @@ class BotPage(QWidget):
         pl.addWidget(row); return tg
 
     def _browse_path(self, field):
-        p, _ = QFileDialog.getOpenFileName(self, "Выбери файл", "",
+        start_dir = str(Path(field.text()).parent) if field.text().strip() else ""
+        p, _ = QFileDialog.getOpenFileName(self, "Выбери файл", start_dir,
                                            "Python/Exe (*.py *.exe);;All (*)")
         if p: field.setText(p)
 
@@ -687,7 +693,9 @@ class BotPage(QWidget):
         self.sig_settings_changed.emit(self.bot)
 
     def _browse_bc_path(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Выбери bot.py", "", "Python файлы (*.py)")
+        cur = self._bc_path_edit.text().strip() or self.bot.path
+        start_dir = str(Path(cur).parent) if cur else ""
+        path, _ = QFileDialog.getOpenFileName(self, "Выбери bot.py", start_dir, "Python файлы (*.py)")
         if path:
             self._bc_path_edit.setText(path)
 
@@ -711,19 +719,18 @@ class BotPage(QWidget):
 
         py = self.bot.python if self.bot.python else "python"
 
-        def _log(line):
-            QTimer.singleShot(0, lambda l=line: self.add_log(f"[Рассылка] {l}"))
-
         def _thread():
             output_lines = []
             try:
                 si = subprocess.STARTUPINFO()
                 si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
                 si.wShowWindow = 0
+                env = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"}
                 proc = subprocess.Popen(
                     py.split() + [path, "broadcast", text],
                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                    text=True, cwd=str(Path(path).parent),
+                    text=True, encoding="utf-8", errors="replace",
+                    cwd=str(Path(path).parent), env=env,
                     creationflags=subprocess.CREATE_NO_WINDOW,
                     startupinfo=si
                 )
@@ -731,47 +738,53 @@ class BotPage(QWidget):
                     line = line.rstrip()
                     if line:
                         output_lines.append(line)
-                        _log(line)
+                        self.sig_broadcast_line.emit(line)
                 proc.wait(timeout=180)
                 full = "\n".join(output_lines)
             except subprocess.TimeoutExpired:
                 proc.kill()
                 full = "timeout"
-                _log("⚠ Таймаут 180 сек")
+                self.sig_broadcast_line.emit("⚠ Таймаут 180 сек")
             except Exception as e:
                 full = f"error:{e}"
-                _log(f"❌ {e}")
+                self.sig_broadcast_line.emit(f"❌ {e}")
 
-            import re
-            def _finish():
-                self._bc_btn.setEnabled(True)
-                self._bc_btn.setText("📢 Отправить всем")
-                if full.startswith("timeout"):
-                    _set_status("⚠ Таймаут", YELLOW)
-                elif full.startswith("error:"):
-                    _set_status(f"❌ {full[6:80]}", RED)
-                elif "Рассылка завершена" in full:
-                    m = re.search(r"TG: (\d+)/(\d+), VK: (\d+)/(\d+)", full)
-                    if m:
-                        tg_ok, tg_tot = int(m.group(1)), int(m.group(2))
-                        vk_ok, vk_tot = int(m.group(3)), int(m.group(4))
-                        failed = (tg_tot - tg_ok) + (vk_tot - vk_ok)
-                        if failed == 0:
-                            _set_status(f"✅ Все получили  TG:{tg_ok}  VK:{vk_ok}", GREEN)
-                        else:
-                            _set_status(f"⚠ TG:{tg_ok}/{tg_tot}  VK:{vk_ok}/{vk_tot}  ({failed} не дошло)", YELLOW)
-                    else:
-                        _set_status("✅ Готово", GREEN)
-                    self._bc_text.clear()
-                elif not full.strip():
-                    _set_status("❌ Нет вывода — проверь путь к боту", RED)
-                else:
-                    last = full.strip().splitlines()[-1]
-                    _set_status(f"❌ {last[:80]}", RED)
-
-            QTimer.singleShot(0, _finish)
+            self.sig_broadcast_done.emit(full)
 
         threading.Thread(target=_thread, daemon=True).start()
+
+    def _on_broadcast_done(self, full):
+        self._bc_btn.setEnabled(True)
+        self._bc_btn.setText("📢 Отправить всем")
+
+        def _set_status(msg, color=GRAY):
+            self._bc_status.setText(msg)
+            self._bc_status.setStyleSheet(
+                f"color:{color};font-size:12px;background:transparent;border:none;")
+
+        import re
+        if full.startswith("timeout"):
+            _set_status("⚠ Таймаут", YELLOW)
+        elif full.startswith("error:"):
+            _set_status(f"❌ {full[6:80]}", RED)
+        elif "Рассылка завершена" in full:
+            m = re.search(r"TG: (\d+)/(\d+), VK: (\d+)/(\d+)", full)
+            if m:
+                tg_ok, tg_tot = int(m.group(1)), int(m.group(2))
+                vk_ok, vk_tot = int(m.group(3)), int(m.group(4))
+                failed = (tg_tot - tg_ok) + (vk_tot - vk_ok)
+                if failed == 0:
+                    _set_status(f"✅ Все получили  TG:{tg_ok}  VK:{vk_ok}", GREEN)
+                else:
+                    _set_status(f"⚠ TG:{tg_ok}/{tg_tot}  VK:{vk_ok}/{vk_tot}  ({failed} не дошло)", YELLOW)
+            else:
+                _set_status("✅ Готово", GREEN)
+            self._bc_text.clear()
+        elif not full.strip():
+            _set_status("❌ Нет вывода — проверь путь к боту", RED)
+        else:
+            last = full.strip().splitlines()[-1]
+            _set_status(f"❌ {last[:80]}", RED)
 
 # ── Страница добавления ───────────────────────────────────────────────────────
 class AddPage(QWidget):
@@ -938,7 +951,6 @@ class SetPage(QWidget):
             ("Уведомления Windows", "win_notifications"),
             ("Звук при ошибке",     "sound"),
         ])
-        self._build_vk_section(cl)
         self._section(cl, "ИНТЕРФЕЙС", [
             ("Сворачивать в трей",    "minimize_to_tray"),
             ("Автоперезапуск ботов",  "auto_restart"),
@@ -1101,6 +1113,7 @@ class SetPage(QWidget):
         self._upd_check_btn.setEnabled(True)
 
     def set_download_error(self):
+        self._update_mode = False
         self._upd_check_btn.setText("❌ Ошибка — попробовать снова")
         self._upd_check_btn.setStyleSheet(self._BTN_DEFAULT)
         self._upd_check_btn.setEnabled(True)
@@ -1136,41 +1149,6 @@ class SetPage(QWidget):
         rl.addWidget(tg); return row
 
     def _tog(self, k, v): self.s[k] = v; self.changed.emit(self.s)
-
-    def _inp(self, k, v): self.s[k] = v; self.changed.emit(self.s)
-
-    def _row_input(self, pl, text, key, placeholder=""):
-        row = QWidget(); row.setFixedHeight(44)
-        row.setStyleSheet(self._TR)
-        rl = QHBoxLayout(row); rl.setContentsMargins(16, 0, 12, 0); rl.setSpacing(12)
-        lb = QLabel(text)
-        lb.setStyleSheet(f"color:{WHITE};font-size:13px;background:transparent;border:none;")
-        e = QLineEdit(self.s.get(key, ""))
-        e.setPlaceholderText(placeholder)
-        e.setFixedSize(190, 28)
-        e.setStyleSheet(
-            f"QLineEdit{{background:#1c1c1e;border:1px solid #3a3a3c;border-radius:6px;"
-            f"color:#ccc;font-size:12px;padding:0 8px;}}"
-            f"QLineEdit:focus{{border-color:{BLUE};}}"
-        )
-        e.textChanged.connect(lambda v, k=key: self._inp(k, v))
-        rl.addWidget(lb); rl.addStretch(); rl.addWidget(e)
-        if pl is not None: pl.addWidget(row)
-        return e
-
-    def _build_vk_section(self, cl):
-        lbl = QLabel("VK УВЕДОМЛЕНИЯ")
-        lbl.setStyleSheet(f"color:{GRAY};font-size:11px;letter-spacing:1px;font-weight:600;"
-                          f"background:transparent;border:none;margin-bottom:2px;")
-        cl.addWidget(lbl)
-        card = QWidget(); card.setStyleSheet(self._CARD)
-        vl = QVBoxLayout(card); vl.setContentsMargins(0, 0, 0, 0); vl.setSpacing(0)
-        vl.addWidget(self._row("VK уведомления", "vk_notifications"))
-        vl.addWidget(self._div())
-        self._row_input(vl, "Токен группы", "vk_token", "vk1.a.XXXXX...")
-        vl.addWidget(self._div())
-        self._row_input(vl, "Ваш VK ID", "vk_user_id", "123456789")
-        cl.addWidget(card)
 
 # ── Змейка ────────────────────────────────────────────────────────────────────
 class SnakeWidget(QWidget):
@@ -1969,36 +1947,6 @@ class App(QMainWindow):
         page = self.pages.get(bot.id)
         if page: page.add_log(line)
 
-    def _send_vk(self, bot_name, status_text):
-        s = self.cfg["settings"]
-        if not s.get("vk_notifications"): return
-        token   = s.get("vk_token",   "").strip()
-        user_id = s.get("vk_user_id", "").strip()
-        if not token or not user_id: return
-        def _run():
-            try:
-                import urllib.parse
-                msg = f"⚠ Bot Manager\nБот «{bot_name}» {status_text}"
-                params = {
-                    "user_id":    user_id,
-                    "message":    msg,
-                    "random_id":  int(time.time() * 1000),
-                    "access_token": token,
-                    "v": "5.131",
-                }
-                url  = "https://api.vk.com/method/messages.send"
-                data = urllib.parse.urlencode(params).encode()
-                req  = urllib.request.Request(url, data=data,
-                       headers={"User-Agent": "BotManager/1.0"})
-                with urllib.request.urlopen(req, timeout=10) as r:
-                    resp = json.loads(r.read())
-                    if "error" in resp:
-                        print(f"VK ошибка {resp['error'].get('error_code')}: "
-                              f"{resp['error'].get('error_msg')}")
-            except Exception as ex:
-                print(f"VK уведомление не отправлено: {ex}")
-        threading.Thread(target=_run, daemon=True).start()
-
     def _reset_fails(self, bot):
         if bot.process and bot.process.poll() is None:
             bot.restart_fails = 0
@@ -2016,13 +1964,11 @@ class App(QMainWindow):
                 self.tray.showMessage("Bot Manager", f"⚠ {bot.name} упал",
                     QSystemTrayIcon.MessageIcon.Warning, 3000)
             if bot.restart_fails >= 3:
-                self._send_vk(bot.name, f"не запускается — 3 попытки подряд провалились")
                 bot.restart_fails = 0
             QTimer.singleShot(10000, lambda: self._start(bot) if bot._alive else None)
         else:
             if page: page.set_status("stopped"); page.add_log("⏹ Завершён")
             self._dot(bot, DARK)
-            self._send_vk(bot.name, "завершён")
 
 _SIGNAL_FILE = Path(tempfile.gettempdir()) / "BotManager_show_signal"
 
@@ -2033,7 +1979,18 @@ if __name__ == "__main__":
         _SIGNAL_FILE.touch()   # сигнал первому экземпляру — покажи окно
         sys.exit(0)
 
+    def _excepthook(exc_type, exc_value, exc_tb):
+        # Необработанное исключение в любом Qt-слоте иначе мгновенно убивает весь процесс.
+        msg = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
+        print(f"ERROR: необработанное исключение:\n{msg}")
+        try:
+            (APP_DIR / "crash.log").write_text(msg, encoding="utf-8")
+        except Exception:
+            pass
+    sys.excepthook = _excepthook
+
     app = QApplication(sys.argv); app.setStyle("Fusion")
+    app.setQuitOnLastWindowClosed(False)  # не убивать процесс при hide() в трей
     win = App()
     win.show()
     code = app.exec()
