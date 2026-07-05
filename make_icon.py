@@ -1,8 +1,10 @@
+import os
 from PIL import Image
 
-src = r"C:\Users\Lеша\Desktop\jkhk\icon_source.png"
-out = r"C:\Users\Lеша\Desktop\jkhk\icon.ico"
-preview = r"C:\Users\Lеша\Desktop\jkhk\icon_preview.png"
+_here = os.path.dirname(os.path.abspath(__file__))
+src = os.path.join(_here, "icon_source.png")
+out = os.path.join(_here, "icon.ico")
+preview = os.path.join(_here, "icon_preview.png")
 
 base = Image.open(src).convert("RGBA")
 
