@@ -89,7 +89,7 @@ _init_job_object()
 
 # Строки в логе бота, которые НЕ считаем ошибкой (обычные обрывы сети со штатным
 # автопереподключением) — редактируются через manager_config.json без пересборки .exe.
-DEFAULT_BENIGN_ERROR_PATTERNS = ["CONNECTION TO REMOTE HOST WAS LOST", "PING PONG FAILED"]
+DEFAULT_BENIGN_ERROR_PATTERNS = ["CONNECTION TO REMOTE HOST WAS LOST", "PING PONG FAILED", "GETADDRINFO FAILED", "ATTEMPTING A RECONNECT"]
 BENIGN_ERROR_PATTERNS = list(DEFAULT_BENIGN_ERROR_PATTERNS)
 
 def load_config():

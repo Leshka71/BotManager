@@ -2,8 +2,8 @@
 #define MyAppVersion "1.3.1"
 #define MyAppPublisher "Lesha"
 #define MyAppExeName "BotManager.exe"
-#define MyAppDir "C:\Users\Lеша\Desktop\jkhk\dist\BotManager"
-#define MyIcon "C:\Users\Lеша\Desktop\jkhk\icon.ico"
+#define MyAppDir SourcePath + "dist\BotManager"
+#define MyIcon SourcePath + "icon.ico"
 
 [Setup]
 AppId={{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}
@@ -12,7 +12,7 @@ AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
 DefaultGroupName={#MyAppName}
 AllowNoIcons=yes
-OutputDir=C:\Users\Lеша\Desktop\jkhk\dist
+OutputDir={#SourcePath}dist
 OutputBaseFilename=BotManager_Setup
 Compression=lzma2
 SolidCompression=yes
