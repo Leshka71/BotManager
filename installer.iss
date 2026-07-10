@@ -1,5 +1,5 @@
 #define MyAppName "Bot Manager"
-#define MyAppVersion "1.4.0"
+#define MyAppVersion "1.4.1"
 #define MyAppPublisher "Lesha"
 #define MyAppExeName "BotManager.exe"
 #define MyAppDir SourcePath + "dist\BotManager"
@@ -40,4 +40,7 @@ Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFile
 Name: "{autodesktop}\{#MyAppName}";  Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\_internal\icon.ico"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
+; Без skipifsilent: автообновление из самой программы запускает установщик с
+; /VERYSILENT — без него BotManager после тихого обновления не перезапускался
+; бы сам, а просто оставался закрытым до следующего ручного запуска.
+Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall

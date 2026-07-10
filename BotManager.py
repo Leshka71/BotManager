@@ -955,7 +955,7 @@ LOG    = "#111111"
 HOVER  = "rgba(255,255,255,0.08)"
 SEL    = "rgba(255,255,255,0.12)"
 
-APP_VERSION = "1.4.0"
+APP_VERSION = "1.4.1"
 GITHUB_REPO = "Leshka71/BotManager"
 
 QSS = f"""
@@ -3843,12 +3843,41 @@ class App(QMainWindow):
                 f"Доступно обновление v{self._upd_ver}",
                 QSystemTrayIcon.MessageIcon.Information, 4000)
 
+    def _download_release_asset(self, url, dest):
+        """Скачивает файл релиза с GitHub. Прямое подключение здесь нередко не
+        работает (GitHub у некоторых провайдеров недоступен без VPN — та же
+        причина, по которой winget не смог скачать Inno Setup в этой же
+        сессии) — если urlretrieve падает, а свой VLESS-прокси сейчас поднят,
+        пробуем скачать через него curl'ом (--socks5-hostname), а не сдаёмся
+        сразу."""
+        try:
+            urllib.request.urlretrieve(url, dest)
+            return
+        except Exception as direct_err:
+            if not (self._vless_bot and self._vless_bot.status == "running"):
+                raise
+            curl = shutil.which("curl") or "curl.exe"
+            try:
+                result = subprocess.run(
+                    [curl, "-L", "--socks5-hostname", f"127.0.0.1:{XRAY_SOCKS_PORT}",
+                     "-o", dest, url, "--fail", "--connect-timeout", "15", "--max-time", "180"],
+                    capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW,
+                )
+            except Exception:
+                raise direct_err
+            if result.returncode != 0 or not Path(dest).exists():
+                raise direct_err
+
     def _do_update(self):
         def _run():
             try:
                 tmp = tempfile.mktemp(suffix=".exe", prefix="BotManager_Setup_")
-                urllib.request.urlretrieve(self._upd_url, tmp)
-                cmd = f'cmd /c timeout /t 3 /nobreak >nul && start "" "{tmp}"'
+                self._download_release_asset(self._upd_url, tmp)
+                # /VERYSILENT — без мастера установки (выбор папки, "уже
+                # существует" и т.п.), просто тихо ставит поверх и выходит.
+                # UAC всё равно спросит один раз (это Windows, не установщик,
+                # без code-signing сертификата не убрать) — дальше без диалогов.
+                cmd = f'cmd /c timeout /t 3 /nobreak >nul && start "" "{tmp}" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART'
                 subprocess.Popen(cmd, shell=True, creationflags=subprocess.CREATE_NO_WINDOW)
                 QMetaObject.invokeMethod(self, "_quit", Qt.ConnectionType.QueuedConnection)
             except Exception:
