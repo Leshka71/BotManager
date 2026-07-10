@@ -17,21 +17,42 @@ from PyQt6.QtWidgets import *
 from PyQt6.QtCore import *
 from PyQt6.QtGui import *
 
-# Папка рядом с .exe (или .py при разработке) — для конфига и записываемых файлов
+# Папка рядом с .exe (или .py при разработке) — только для read-only ресурсов
+# (иконка, xray.exe "как установлено", dino). Установщик кладёт программу в
+# Program Files, куда обычный (не запущенный от администратора) процесс не
+# может ПИСАТЬ — раньше конфиг/логи/xray-рабочие файлы писались прямо сюда, и
+# запись молча проваливалась (см. save_config), из-за чего боты/подписки/
+# профили выглядели добавленными в UI, но "терялись" при следующем запуске.
+# Все ЗАПИСЫВАЕМЫЕ данные теперь живут в стандартной пользовательской папке.
 if getattr(sys, 'frozen', False):
     APP_DIR = Path(sys.executable).parent
     RES_DIR = Path(sys._MEIPASS)
+    DATA_DIR = Path(os.environ.get("LOCALAPPDATA", APP_DIR)) / "Bot Manager"
 else:
     APP_DIR = Path(__file__).parent
     RES_DIR = Path(__file__).parent
+    DATA_DIR = APP_DIR
 
-CONFIG_FILE = APP_DIR / "manager_config.json"
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+CONFIG_FILE = DATA_DIR / "manager_config.json"
+if not CONFIG_FILE.exists():
+    # Миграция один раз: у уже установленных версий конфиг мог реально
+    # существовать рядом с .exe (например, если раньше программу всегда
+    # запускали от администратора) — переносим его, чтобы не потерять
+    # ботов/профили при обновлении на эту версию.
+    _old_config = APP_DIR / "manager_config.json"
+    if _old_config.exists():
+        try:
+            shutil.copy2(_old_config, CONFIG_FILE)
+        except Exception:
+            pass
 
 # Лог каждого бота на диске — окно логов в UI (QTextEdit) живёт только в памяти
 # и теряется при перезапуске BotManager, так что если бот падает без трейсбека
 # в консоли (например, процесс убит извне при обрыве VPN), разобраться постфактум
 # было нечем. Пишем сюда те же строки, что летят в add_log(), с ротацией по размеру.
-LOGS_DIR = APP_DIR / "logs"
+LOGS_DIR = DATA_DIR / "logs"
 MAX_BOT_LOG_BYTES = 2 * 1024 * 1024  # 2 МБ на бота — этого хватает поймать трейсбек/контекст падения
 
 def _append_bot_log(bot_id, ts, line):
@@ -203,9 +224,29 @@ def save_config(cfg):
         print(f"ERROR: не удалось сохранить конфиг: {e}")
 
 # ── VLESS / Xray-прокси ─────────────────────────────────────────────────────────
-XRAY_DIR = APP_DIR / "xray"
+XRAY_DIR = DATA_DIR / "xray"
 XRAY_EXE = XRAY_DIR / "xray.exe"
 XRAY_CONFIG_FILE = XRAY_DIR / "config.json"
+
+def _ensure_xray_binary():
+    """xray.exe/geoip.dat/geosite.dat лежат в бандле (RES_DIR/xray, рядом с
+    программой в Program Files) — при первом запуске копируем их в
+    перезаписываемую XRAY_DIR (DATA_DIR/xray), куда xray потом сам обновляет
+    geoip/geosite и куда мы пишем сгенерированный config.json."""
+    if XRAY_EXE.exists():
+        return
+    bundled = RES_DIR / "xray"
+    if not bundled.exists():
+        return
+    try:
+        XRAY_DIR.mkdir(parents=True, exist_ok=True)
+        for f in bundled.iterdir():
+            if f.is_file():
+                shutil.copy2(f, XRAY_DIR / f.name)
+    except Exception:
+        pass
+
+_ensure_xray_binary()
 XRAY_SOCKS_PORT = 28808  # намеренно не 10808/1080 — эти порты часто заняты другими VPN-клиентами (Happ и т.п.)
 
 # Файл-метка с текущим портом SOCKS5 — читают bot.py/BotTwitch01.py (на этой же
@@ -245,7 +286,7 @@ def ensure_geo_files(log_fn=None):
 # Qt на Windows не умеет рисовать эмодзи-флаги (пара Regional Indicator Symbols) —
 # показывает двухбуквенный код текстом вместо картинки. Поэтому иконку берём
 # отдельно с flagcdn.com по ISO-коду и кэшируем локально.
-FLAGS_DIR = APP_DIR / "flags"
+FLAGS_DIR = DATA_DIR / "flags"
 FLAGCDN_URL_TMPL = "https://flagcdn.com/24x18/{code}.png"
 
 def extract_flag_code(name):
@@ -4546,7 +4587,7 @@ if __name__ == "__main__":
         msg = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
         print(f"ERROR: необработанное исключение:\n{msg}")
         try:
-            (APP_DIR / "crash.log").write_text(msg, encoding="utf-8")
+            (DATA_DIR / "crash.log").write_text(msg, encoding="utf-8")
         except Exception:
             pass
     sys.excepthook = _excepthook
