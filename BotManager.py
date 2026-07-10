@@ -2947,6 +2947,15 @@ class NetPage(QWidget):
         # хендлере) — finished эмитится QThread'ом строго ПОСЛЕ result/error,
         # так что рендер оттуда всегда видел бы воркер ещё "занятым", и кнопка
         # "Обновить" никогда не появлялась бы обратно (оставалось "Обновляю...").
+        # wait() ДО pop(): finished эмитится изнутри потока чуть РАНЬШЕ, чем ОС
+        # физически завершает поток — если тут же уронить последнюю Python-
+        # ссылку (pop), сборщик мусора может уничтожить ещё не до конца
+        # остановленный QThread ("QThread: Destroyed while thread is still
+        # running"), а это фатально валит процесс (тот же класс бага, что
+        # описан в _stop_background_workers).
+        worker = self._sub_fetch_workers.get(sub_id)
+        if worker is not None:
+            worker.wait()
         self._sub_fetch_workers.pop(sub_id, None)
         self._render_subscriptions()
 
@@ -3372,6 +3381,11 @@ class NetPage(QWidget):
         self._render_profiles()
 
     def _on_flag_dl_finished(self):
+        # wait() перед сбросом ссылки — см. комментарий в _on_sub_worker_finished:
+        # finished эмитится чуть раньше физического завершения ОС-потока, ронять
+        # последнюю Python-ссылку раньше времени рискует фатальным крашем Qt.
+        if self._flag_dl is not None:
+            self._flag_dl.wait()
         self._flag_dl = None
 
     def _extract_remark(self, raw):
