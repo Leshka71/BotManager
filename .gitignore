@@ -6,3 +6,6 @@ dist/
 manager_config.json
 icon_source.png
 icon_preview.png
+xray/
+flags/
+logs/
